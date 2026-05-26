@@ -1,7 +1,6 @@
 import telebot
 from telebot import types
 import random
-import time
 import json
 import os
 
@@ -9,9 +8,6 @@ import os
 TOKEN = "8711407704:AAGZWhw8jXSjoofD2w7MlFJy-6_guVXYU0E"
 ADMINS = ["1674945230", "7908057052"] 
 bot = telebot.TeleBot(TOKEN)
-
-# Настройка КД (3600 сек = 1 час)
-COOLDOWN_TIME = 3600 
 
 FILES = {
     'cards': 'cards_data.json', 
@@ -29,7 +25,6 @@ STATS = {
 }
 
 POSITIONS = ["LF", "CF", "RF", "CM", "LB", "RB"]
-last_roll = {}
 
 # --- [2] БД ФУНКЦИИ ---
 def load_db(key):
@@ -78,20 +73,9 @@ def start(m):
     bot.send_message(m.chat.id, "👋 Привет! Это бот СЛС карточек с функцией менеджмента состава.", 
                      reply_markup=main_kb(m.from_user), parse_mode="Markdown")
 
-# Нажатие на обычную кнопку "Получить карту" -> Показываем Пак
+# Нажатие на "Получить карту" -> Красиво показываем Пак с кнопками
 @bot.message_handler(func=lambda m: m.text == "Получить карту")
 def roll_start(m):
-    uid = str(m.from_user.id)
-    is_admin = is_admin_user(m.from_user)
-
-    if not is_admin:
-        now = time.time()
-        if uid in last_roll:
-            elapsed = now - last_roll[uid]
-            if elapsed < COOLDOWN_TIME:
-                remains = int(COOLDOWN_TIME - elapsed)
-                return bot.send_message(m.chat.id, f"⏳ Нужно подождать еще {remains // 60} мин. {remains % 60} сек.")
-
     cards = load_db('cards')
     if not cards: 
         return bot.send_message(m.chat.id, "❌ В игре пока нет карточек! Добавьте их через админ-панель.")
@@ -100,15 +84,17 @@ def roll_start(m):
     markup.row(types.InlineKeyboardButton("🎁 Открыть", callback_data="open_pack"))
     markup.row(types.InlineKeyboardButton("⬅️ Отмена", callback_data="cancel_pack"))
 
+    # Твоя картинка пака из репозитория GitHub
     pack_img = '465d12ab-8fc3-4bc1-853e-dd4c3a10de12.png'
+    
     try:
         with open(pack_img, 'rb') as photo:
             bot.send_photo(m.chat.id, photo, caption="🎁 **Бесплатный пак готов!**", reply_markup=markup, parse_mode="Markdown")
     except Exception as e:
-        # Если картинка пака не найдена на сервере, бот отправит просто текст с кнопками и НЕ упадет!
-        bot.send_message(m.chat.id, "🎁 **Бесплатный пак готов!** (Изображение загружается...)", reply_markup=markup, parse_mode="Markdown")
+        # Если вдруг файл не найден, бот отправит текст и кнопки, но НЕ упадет
+        bot.send_message(m.chat.id, "🎁 **Бесплатный пак готов!**", reply_markup=markup, parse_mode="Markdown")
 
-# Обработка инлайн-кнопок пака
+# Обработка кнопок "🎁 Открыть" и "⬅️ Отмена"
 @bot.callback_query_handler(func=lambda call: call.data in ["open_pack", "cancel_pack"])
 def pack_callback(call):
     uid = str(call.from_user.id)
@@ -119,18 +105,9 @@ def pack_callback(call):
         except: pass
         return
 
-    is_admin = is_admin_user(call.from_user)
-    if not is_admin:
-        now = time.time()
-        if uid in last_roll:
-            if now - last_roll[uid] < COOLDOWN_TIME:
-                bot.answer_callback_query(call.id, "⏳ Кулдаун еще не прошел!", show_alert=True)
-                return
-        last_roll[uid] = now
-
     bot.answer_callback_query(call.id, "✨ Открываем пак...")
 
-    # Удаляем сообщение с паком, чтобы сразу показать выбитую карту
+    # Удаляем пак, чтобы на его месте показать выбитого игрока
     try: bot.delete_message(call.message.chat.id, call.message.message_id)
     except: pass
 
@@ -172,8 +149,7 @@ def pack_callback(call):
     try:
         bot.send_photo(call.message.chat.id, won['photo'], caption=caption, parse_mode="Markdown")
     except Exception as e:
-        # Если у выбитой карты старый/сломанный file_id, бот выдаст её ТЕКСТОМ и не упадет!
-        bot.send_message(call.message.chat.id, f"🏃‍♂️ **Карточка успешно выбита!** (Фото временно недоступно, передобавьте её в админке)\n\n{caption}", parse_mode="Markdown")
+        bot.send_message(call.message.chat.id, f"🏃‍♂️ **Карточка успешно выбита!**\n\n{caption}", parse_mode="Markdown")
 
 # --- [5] СИСТЕМА СОСТАВА ---
 def get_squad_text(uid):
