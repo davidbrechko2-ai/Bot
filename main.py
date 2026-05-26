@@ -5,10 +5,14 @@ from telebot.storage import StateMemoryStorage
 import random
 import json
 import os
+import logging
+
+# --- [0] НАСТРОЙКА ЛОГИРОВАНИЯ ---
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- [1] КОНФИГУРАЦИЯ ---
-TOKEN = "8711407704:AAGZWhw8jXSjoofD2w7MlFJy-6_guVXYU0E"
-ADMINS = [1674945230, 7908057052] 
+TOKEN = "8610869446:AAHlOyFAteMgPXZe8Ehizb-QCpP1VpCmfhU"
+ADMINS = [1674945230, 7908057052]  # ID администраторов (числа int)
 
 state_storage = StateMemoryStorage()
 bot = telebot.TeleBot(TOKEN, state_storage=state_storage)
@@ -28,10 +32,10 @@ STATS = {
     5: {"score": 10000}
 }
 
-# ТЕПЕРЬ С GK!
+# Доступные позиции (включая Вратаря)
 POSITIONS = ["LF", "CF", "RF", "CM", "LB", "RB", "GK"]
 
-# --- [2] СОСТОЯНИЯ (FSM) ---
+# --- [2] СОСТОЯНИЯ ДЛЯ АДМИН-ПАНЕЛИ (FSM) ---
 class AddCardState(StatesGroup):
     name = State()
     ovr = State()
@@ -41,26 +45,36 @@ class AddCardState(StatesGroup):
     stars = State()
     photo = State()
 
-# --- [3] БД ФУНКЦИИ ---
+# --- [3] БАЗА ДАННЫХ И ХЕЛПЕРЫ ---
 def load_db(key):
     if not os.path.exists(FILES[key]):
         res = {} if key != 'cards' else []
         save_db(res, key)
         return res
     with open(FILES[key], 'r', encoding='utf-8') as f:
-        try: return json.load(f)
-        except: return {} if key != 'cards' else []
+        try: 
+            return json.load(f)
+        except Exception: 
+            res = {} if key != 'cards' else []
+            save_db(res, key)
+            return res
 
 def save_db(data, key):
     with open(FILES[key], 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
 def get_stars(count):
-    try: return "⭐️" * int(count)
-    except: return "⭐️"
+    try: 
+        return "⭐️" * int(count)
+    except Exception: 
+        return "⭐️"
 
 def is_admin(m):
     return m.from_user.id in ADMINS
+
+def async_with_state(m, key, value):
+    with bot.retrieve_data(m.from_user.id, m.chat.id) as data:
+        data[key] = value
 
 # --- [4] КЛАВИАТУРЫ ---
 def main_kb(user):
@@ -78,7 +92,13 @@ def admin_kb():
     markup.row("📊 Статистика базы", "🏠 Назад в меню")
     return markup
 
-# --- [5] ЛОГИКА ИГРЫ ---
+# --- [5] АВАРІЙНЫЙ СБРОС СОСТОЯНИЙ ---
+@bot.message_handler(commands=['clear', 'сброс', 'stop'], state="*")
+def cancel_any_state(m):
+    bot.delete_state(m.from_user.id, m.chat.id)
+    bot.send_message(m.chat.id, "🔄 Все зависшие процессы и состояния успешно сброшены!", reply_markup=main_kb(m.from_user))
+
+# --- [6] ЛОГИКА ИГРЫ ---
 
 @bot.message_handler(commands=['start'])
 def start(m):
@@ -87,7 +107,8 @@ def start(m):
     if uid not in users:
         users[uid] = {"score": 0, "username": m.from_user.username or f"user_{uid}"}
         save_db(users, 'users')
-    bot.send_message(m.chat.id, "👋 Привет! Это бот СЛС карточек с функцией менеджмента состава.", 
+    bot.send_message(m.chat.id, "👋 Привет! Это бот СЛС карточек с функцией менеджмента состава.\n\n"
+                                "Если бот когда-либо перестанет отвечать на кнопки, отправьте команду /clear", 
                      reply_markup=main_kb(m.from_user), parse_mode="Markdown")
 
 @bot.message_handler(func=lambda m: m.text == "Получить карту")
@@ -104,8 +125,8 @@ def roll_start(m):
     try:
         with open(pack_img, 'rb') as photo:
             bot.send_photo(m.chat.id, photo, caption="🎁 **Бесплатный пак готов!**", reply_markup=markup, parse_mode="Markdown")
-    except Exception as e:
-        bot.send_message(m.chat.id, "🎁 **Бесплатный пак готов!**", reply_markup=markup, parse_mode="Markdown")
+    except Exception:
+        bot.send_message(m.chat.id, "🎁 **Бесплатный пак готов!** (Изображение пака не найдено)", reply_markup=markup, parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: call.data in ["open_pack", "cancel_pack"])
 def pack_callback(call):
@@ -113,12 +134,12 @@ def pack_callback(call):
     if call.data == "cancel_pack":
         bot.answer_callback_query(call.id, "Открыто позже")
         try: bot.delete_message(call.message.chat.id, call.message.message_id)
-        except: pass
+        except Exception: pass
         return
 
     bot.answer_callback_query(call.id, "✨ Открываем пак...")
     try: bot.delete_message(call.message.chat.id, call.message.message_id)
-    except: pass
+    except Exception: pass
 
     cards = load_db('cards')
     users = load_db('users')
@@ -156,10 +177,10 @@ def pack_callback(call):
     )
     try:
         bot.send_photo(call.message.chat.id, won['photo'], caption=caption, parse_mode="Markdown")
-    except Exception as e:
+    except Exception:
         bot.send_message(call.message.chat.id, f"🏃‍♂️ **Карточка успешно выбита!**\n\n{caption}", parse_mode="Markdown")
 
-# --- [6] СИСТЕМА СОСТАВА (ОБНОВЛЕНА С GK) ---
+# --- [7] СИСТЕМА СОСТАВА (GK ВКЛЮЧЕН) ---
 def get_squad_text(uid):
     squads = load_db('squads')
     my_squad = squads.get(uid, {p: None for p in POSITIONS})
@@ -170,7 +191,7 @@ def get_squad_text(uid):
     cm = my_squad.get("CM") or "[Пусто]"
     lb = my_squad.get("LB") or "[Пусто]"
     rb = my_squad.get("RB") or "[Пусто]"
-    gk = my_squad.get("GK") or "[Пусто]" # Добавили в отображение
+    gk = my_squad.get("GK") or "[Пусто]"
     
     colls = load_db('colls')
     my_cards = colls.get(uid, [])
@@ -195,7 +216,7 @@ def get_squad_text(uid):
         f"🔥 **АТАКА:**\n LF: `{lf}` | CF: `{cf}` | RF: `{rf}`\n\n"
         f"⚡️ **ПОЛУЗАЩИТА:**\n CM: `{cm}`\n\n"
         f"🛡 **ЗАЩИТА:**\n LB: `{lb}` | RB: `{rb}`\n\n"
-        f"🧤 **ВРАТАРЬ:**\n GK: `{gk}`\n\n" # Добавлен блок вратаря
+        f"🧤 **ВРАТАРЬ:**\n GK: `{gk}`\n\n"
         f" — — — — — — — — — — — —\n"
         f" Нажмите на кнопку ниже, чтобы изменить позицию:"
     )
@@ -251,7 +272,7 @@ def back_squad_callback(call):
     markup.add(*[types.InlineKeyboardButton(f"⚙️ {p}", callback_data=f"pos_{p}") for p in POSITIONS])
     bot.edit_message_text(get_squad_text(uid), call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
-# --- [7] АДМИН-ПАНЕЛЬ С ВАЛИДАЦИЕЙ И FSM ---
+# --- [8] АДМИН-ПАНЕЛЬ ---
 
 @bot.message_handler(func=lambda m: m.text == "🛠 Админ-панель" and is_admin(m))
 def admin_panel(m):
@@ -262,62 +283,70 @@ def admin_panel(m):
 def admin_stats(m):
     cards = load_db('cards')
     users = load_db('users')
-    text = (f"📈 **Статистика:**\n"
-            f"└ Карточек в базе: `{len(cards)}`\n"
-            f"└ Всего игроков: `{len(users)}`")
+    text = (f"📈 **Статистика Бот-системы:**\n"
+            f"└ Карточек создано в базе: `{len(cards)}`\n"
+            f"└ Всего уникальных игроков: `{len(users)}`")
     bot.send_message(m.chat.id, text, parse_mode="Markdown")
 
+# Шаг 1: Имя
 @bot.message_handler(func=lambda m: m.text == "➕ Добавить карту" and is_admin(m))
 def start_add_card(m):
     bot.set_state(m.from_user.id, AddCardState.name, m.chat.id)
     bot.send_message(m.chat.id, "1️⃣ Введите **ИМЯ** игрока:", parse_mode="Markdown", 
                      reply_markup=types.ReplyKeyboardRemove())
 
+# Шаг 2: OVR
 @bot.message_handler(state=AddCardState.name)
 def process_name(m):
     async_with_state(m, 'name', m.text)
     bot.set_state(m.from_user.id, AddCardState.ovr, m.chat.id)
-    bot.send_message(m.chat.id, f"2️⃣ Введите **OVR** (число) для {m.text}:")
+    bot.send_message(m.chat.id, f"2️⃣ Введите общий рейтинг **OVR** (число) для {m.text}:", parse_mode="Markdown")
 
+# Шаг 3: Событие
 @bot.message_handler(state=AddCardState.ovr)
 def process_ovr(m):
     if not m.text.isdigit():
-        return bot.send_message(m.chat.id, "❌ Ошибка! Введите число (например: 89)")
+        return bot.send_message(m.chat.id, "❌ Ошибка! Введите корректное число (например: 89):")
     async_with_state(m, 'ovr', m.text)
     bot.set_state(m.from_user.id, AddCardState.event, m.chat.id)
-    bot.send_message(m.chat.id, "3️⃣ Введите **НАЗВАНИЕ СОБЫТИЯ** (например: TOTS):")
+    bot.send_message(m.chat.id, "3️⃣ Введите **НАЗВАНИЕ СОБЫТИЯ** (например: Редкая, TOTS, СЛС):", parse_mode="Markdown")
 
+# Шаг 4: Позиция
 @bot.message_handler(state=AddCardState.event)
 def process_event(m):
     async_with_state(m, 'event', m.text)
     bot.set_state(m.from_user.id, AddCardState.pos, m.chat.id)
     
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    markup.add(*POSITIONS) # Тут автоматически появится кнопка GK
-    bot.send_message(m.chat.id, "4️⃣ Выберите **ПОЗИЦИЮ**:", reply_markup=markup)
+    markup.add(*POSITIONS)
+    bot.send_message(m.chat.id, "4️⃣ Выберите одну из **ПОЗИЦИЙ**:", reply_markup=markup, parse_mode="Markdown")
 
+# Шаг 5: Редкость
 @bot.message_handler(state=AddCardState.pos)
 def process_pos(m):
     if m.text.upper() not in POSITIONS:
-        return bot.send_message(m.chat.id, "❌ Выберите позицию из предложенных кнопок!")
+        return bot.send_message(m.chat.id, "❌ Воспользуйтесь кнопками на клавиатуре для выбора позиции!")
     async_with_state(m, 'pos', m.text.upper())
     bot.set_state(m.from_user.id, AddCardState.rarity, m.chat.id)
-    bot.send_message(m.chat.id, "5️⃣ Введите **РЕДКОСТЬ** (например: LEGENDARY):", reply_markup=types.ReplyKeyboardRemove())
+    bot.send_message(m.chat.id, "5️⃣ Введите **РЕДКОСТЬ** текста (например: EPIC, LEGENDARY):", reply_markup=types.ReplyKeyboardRemove(), parse_mode="Markdown")
 
+# Шаг 6: Звезды
 @bot.message_handler(state=AddCardState.rarity)
 def process_rarity(m):
     async_with_state(m, 'rarity', m.text.upper())
     bot.set_state(m.from_user.id, AddCardState.stars, m.chat.id)
-    bot.send_message(m.chat.id, "6️⃣ Введите **КОЛ-ВО ЗВЕЗД** (1-5):")
+    bot.send_message(m.chat.id, "6️⃣ Введите **КОЛИЧЕСТВО ЗВЕЗД** (число от 1 до 5):", parse_mode="Markdown")
 
+# Шаг 7: Фотография
 @bot.message_handler(state=AddCardState.stars)
 def process_stars(m):
     if not m.text.isdigit() or not (1 <= int(m.text) <= 5):
-        return bot.send_message(m.chat.id, "❌ Введите число строго от 1 до 5!")
+        return bot.send_message(m.chat.id, "❌ Ошибка! Нужно ввести число строго от 1 до 5!")
     async_with_state(m, 'stars', int(m.text))
     bot.set_state(m.from_user.id, AddCardState.photo, m.chat.id)
-    bot.send_message(m.chat.id, "7️⃣ Отправьте **ФОТО** карточки:")
+    bot.send_message(m.chat.id, "7️⃣ Отправьте **ФОТО** для карточки:", parse_mode="Markdown")
 
+# Сохранение карты
 @bot.message_handler(state=AddCardState.photo, content_types=['photo'])
 def process_final_photo(m):
     with bot.retrieve_data(m.from_user.id, m.chat.id) as data:
@@ -336,31 +365,28 @@ def process_final_photo(m):
     save_db(cards, 'cards')
     
     bot.delete_state(m.from_user.id, m.chat.id)
-    bot.send_message(m.chat.id, f"✅ Карта **{new_card['name']}** ({new_card['pos']}) успешно создана!", 
+    bot.send_message(m.chat.id, f"✅ Новая карточка игрока **{new_card['name']}** успешно добавлена!", 
                      reply_markup=admin_kb(), parse_mode="Markdown")
 
-def async_with_state(m, key, value):
-    with bot.retrieve_data(m.from_user.id, m.chat.id) as data:
-        data[key] = value
-
+# Удаление карт
 @bot.message_handler(func=lambda m: m.text == "🗑 Удалить карту" and is_admin(m))
 def delete_card_menu(m):
     cards = load_db('cards')
-    if not cards: return bot.send_message(m.chat.id, "❌ В базе нет карт.")
+    if not cards: return bot.send_message(m.chat.id, "❌ База данных карточек пуста.")
     
     markup = types.InlineKeyboardMarkup()
     for c in cards[-15:]:
-        markup.add(types.InlineKeyboardButton(f"❌ {c['name']} ({c['pos']} | {c['ovr']})", callback_data=f"del_{c['name']}"))
-    bot.send_message(m.chat.id, "Выберите карту для удаления (последние 15):", reply_markup=markup)
+        markup.add(types.InlineKeyboardButton(f"❌ {c['name']} ({c['pos']} | OVR: {c['ovr']})", callback_data=f"del_{c['name']}"))
+    bot.send_message(m.chat.id, "Выберите карточку для удаления (последние 15):", reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("del_"))
 def process_delete(call):
     name_to_delete = call.data.replace("del_", "")
     cards = load_db('cards')
     save_db([c for c in cards if c['name'] != name_to_delete], 'cards')
-    bot.edit_message_text(f"✅ Карта **{name_to_delete}** удалена.", call.message.chat.id, call.message.message_id)
+    bot.edit_message_text(f"✅ Карточка **{name_to_delete}** успешно удалена из базы.", call.message.chat.id, call.message.message_id)
 
-# --- [8] СТАНДАРТНЫЕ КОМАНДЫ ПОЛЬЗОВАТЕЛЕЙ ---
+# --- [9] СТАНДАРТНЫЕ КОМАНДЫ ПОЛЬЗОВАТЕЛЕЙ ---
 
 @bot.message_handler(func=lambda m: m.text == "🏆 Топ игроков")
 def top_players(m):
@@ -377,7 +403,7 @@ def my_collection(m):
     uid = str(m.from_user.id)
     my_cards = load_db('colls').get(uid, [])
     if not my_cards: 
-        return bot.send_message(m.chat.id, "🗂 Ваша коллекция пока пуста!")
+        return bot.send_message(m.chat.id, "🗂 Ваша личная коллекция пока пуста!")
     
     text = f"🗂 **ВАША КОЛЛЕКЦИЯ ({len(my_cards)} шт.):**\n\n"
     for card in my_cards:
@@ -403,11 +429,15 @@ def prem(m):
 
 @bot.message_handler(func=lambda m: m.text == "🏠 Назад в меню")
 def back_home(m):
-    bot.send_message(m.chat.id, "Вы вернулись в меню:", reply_markup=main_kb(m))
+    bot.send_message(m.chat.id, "Вы вернулись в главное меню:", reply_markup=main_kb(m.from_user))
 
-# Включаем фильтры
+# Регистрация системных фильтров
 bot.add_custom_filter(custom_filters.StateFilter(bot))
 
+# --- [10] ЗАПУСК БОТА ---
 if __name__ == '__main__':
-    print("Бот успешно запущен!")
-    bot.infinity_polling()
+    print("Бот успешно инициализирован и слушает новый токен...")
+    try:
+        bot.polling(none_stop=True)
+    except Exception as e:
+        print(f"Критическое исключение при старте пуллинга: {e}")
