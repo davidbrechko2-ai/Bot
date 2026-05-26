@@ -1,6 +1,7 @@
 import telebot
 from telebot import types
 import random
+import time
 import json
 import os
 
@@ -8,6 +9,9 @@ import os
 TOKEN = "8711407704:AAGZWhw8jXSjoofD2w7MlFJy-6_guVXYU0E"
 ADMINS = ["1674945230", "7908057052"] 
 bot = telebot.TeleBot(TOKEN)
+
+# Настройка КД (3600 сек = 1 час)
+COOLDOWN_TIME = 3600 
 
 FILES = {
     'cards': 'cards_data.json', 
@@ -25,6 +29,7 @@ STATS = {
 }
 
 POSITIONS = ["LF", "CF", "RF", "CM", "LB", "RB"]
+last_roll = {}
 
 # --- [2] БД ФУНКЦИИ ---
 def load_db(key):
@@ -70,33 +75,82 @@ def start(m):
     if uid not in users:
         users[uid] = {"score": 0, "username": m.from_user.username or f"user_{uid}"}
         save_db(users, 'users')
-    bot.send_message(m.chat.id, "👋 Привет! Это бот СЛС карточек. Нажми 'Получить карту', чтобы испытать удачу!", 
+    bot.send_message(m.chat.id, "👋 Привет! Это бот СЛС карточек с функцией менеджмента состава.", 
                      reply_markup=main_kb(m.from_user), parse_mode="Markdown")
 
-# НОВАЯ ПРЯМАЯ ФУНКЦИЯ ВЫДАЧИ КАРТЫ (БЕЗ КУЛДАУНОВ И ПАКОВ)
+# Нажатие на обычную кнопку "Получить карту" -> Показываем Пак
 @bot.message_handler(func=lambda m: m.text == "Получить карту")
-def roll_card_direct(m):
+def roll_start(m):
     uid = str(m.from_user.id)
+    is_admin = is_admin_user(m.from_user)
+
+    if not is_admin:
+        now = time.time()
+        if uid in last_roll:
+            elapsed = now - last_roll[uid]
+            if elapsed < COOLDOWN_TIME:
+                remains = int(COOLDOWN_TIME - elapsed)
+                return bot.send_message(m.chat.id, f"⏳ Нужно подождать еще {remains // 60} мин. {remains % 60} сек.")
+
+    cards = load_db('cards')
+    if not cards: 
+        return bot.send_message(m.chat.id, "❌ В игре пока нет карточек! Добавьте их через админ-панель.")
+
+    markup = types.InlineKeyboardMarkup()
+    markup.row(types.InlineKeyboardButton("🎁 Открыть", callback_data="open_pack"))
+    markup.row(types.InlineKeyboardButton("⬅️ Отмена", callback_data="cancel_pack"))
+
+    pack_img = '465d12ab-8fc3-4bc1-853e-dd4c3a10de12.png'
+    try:
+        with open(pack_img, 'rb') as photo:
+            bot.send_photo(m.chat.id, photo, caption="🎁 **Бесплатный пак готов!**", reply_markup=markup, parse_mode="Markdown")
+    except Exception as e:
+        # Если картинка пака не найдена на сервере, бот отправит просто текст с кнопками и НЕ упадет!
+        bot.send_message(m.chat.id, "🎁 **Бесплатный пак готов!** (Изображение загружается...)", reply_markup=markup, parse_mode="Markdown")
+
+# Обработка инлайн-кнопок пака
+@bot.callback_query_handler(func=lambda call: call.data in ["open_pack", "cancel_pack"])
+def pack_callback(call):
+    uid = str(call.from_user.id)
+    
+    if call.data == "cancel_pack":
+        bot.answer_callback_query(call.id, "Открыто позже")
+        try: bot.delete_message(call.message.chat.id, call.message.message_id)
+        except: pass
+        return
+
+    is_admin = is_admin_user(call.from_user)
+    if not is_admin:
+        now = time.time()
+        if uid in last_roll:
+            if now - last_roll[uid] < COOLDOWN_TIME:
+                bot.answer_callback_query(call.id, "⏳ Кулдаун еще не прошел!", show_alert=True)
+                return
+        last_roll[uid] = now
+
+    bot.answer_callback_query(call.id, "✨ Открываем пак...")
+
+    # Удаляем сообщение с паком, чтобы сразу показать выбитую карту
+    try: bot.delete_message(call.message.chat.id, call.message.message_id)
+    except: pass
+
     cards = load_db('cards')
     users = load_db('users')
     colls = load_db('colls')
 
-    # Если карт нет в базе — сразу пишем об этом, бот не зависнет
-    if not cards: 
-        return bot.send_message(m.chat.id, "❌ В базе еще нет карточек! Зайди в '🛠 Админ-панель' и добавь хотя бы одного игрока.")
+    if not cards:
+        return bot.send_message(call.message.chat.id, "❌ Ошибка: база карт пуста.")
 
-    # Случайный выбор
     won = random.choice(cards)
+    if uid not in colls: colls[uid] = []
     
-    if uid not in colls: 
-        colls[uid] = []
-    if uid not in users:
-        users[uid] = {"score": 0, "username": m.from_user.username or f"user_{uid}"}
-
     is_new = not any(c['name'] == won['name'] for c in colls[uid])
     base_pts = STATS.get(int(won.get('stars', 1)), {"score": 500})["score"]
     added_pts = base_pts if is_new else int(base_pts * 0.3)
     
+    if uid not in users:
+        users[uid] = {"score": 0, "username": call.from_user.username or f"user_{uid}"}
+
     users[uid]['score'] += int(added_pts)
     if is_new:
         colls[uid].append(won)
@@ -115,21 +169,30 @@ def roll_card_direct(m):
         f"💠 Очки: +{int(added_pts):,} | Всего: {users[uid]['score']:,}"
     )
     
-    # Прямая отправка: сначала пробуем фото, если Telegram отклоняет file_id — шлем текстом
     try:
-        bot.send_photo(m.chat.id, won['photo'], caption=caption, parse_mode="Markdown")
+        bot.send_photo(call.message.chat.id, won['photo'], caption=caption, parse_mode="Markdown")
     except Exception as e:
-        bot.send_message(m.chat.id, f"🏃‍♂️ **Карточка успешно выбита!** (Изображение перезагружается админом)\n\n{caption}", parse_mode="Markdown")
+        # Если у выбитой карты старый/сломанный file_id, бот выдаст её ТЕКСТОМ и не упадет!
+        bot.send_message(call.message.chat.id, f"🏃‍♂️ **Карточка успешно выбита!** (Фото временно недоступно, передобавьте её в админке)\n\n{caption}", parse_mode="Markdown")
 
 # --- [5] СИСТЕМА СОСТАВА ---
 def get_squad_text(uid):
     squads = load_db('squads')
     my_squad = squads.get(uid, {p: None for p in POSITIONS})
+    
+    lf = my_squad.get("LF") or "[Пусто]"
+    cf = my_squad.get("CF") or "[Пусто]"
+    rf = my_squad.get("RF") or "[Пусто]"
+    cm = my_squad.get("CM") or "[Пусто]"
+    lb = my_squad.get("LB") or "[Пусто]"
+    rb = my_squad.get("RB") or "[Пусто]"
+    
     colls = load_db('colls')
     my_cards = colls.get(uid, [])
     
     total_ovr = 0
     players_count = 0
+    
     for pos in POSITIONS:
         p_name = my_squad.get(pos)
         if p_name:
@@ -144,10 +207,11 @@ def get_squad_text(uid):
         f"📋 **ВАШ ТЕКУЩИЙ СОСТАВ**\n"
         f"📊 Общий OVR состава: `{avg_ovr}`\n"
         f" — — — — — — — — — — — —\n\n"
-        f"🔥 **АТАКА:**\n LF: `{my_squad.get('LF') or '[Пусто]'}`\n CF: `{my_squad.get('CF') or '[Пусто]'}`\n RF: `{my_squad.get('RF') or '[Пусто]'}`\n\n"
-        f"⚡️ **ПОЛУЗАЩИТА:**\n CM: `{my_squad.get('CM') or '[Пусто]'}`\n\n"
-        f"🛡 **ЗАЩИТА:**\n LB: `{my_squad.get('LB') or '[Пусто]'}`\n RB: `{my_squad.get('RB') or '[Пусто]'}`\n\n"
-        f" — — — — — — — — — — — —"
+        f"🔥 **АТАКА:**\n LF: `{lf}`\n CF: `{cf}`\n RF: `{rf}`\n\n"
+        f"⚡️ **ПОЛУЗАЩИТА:**\n CM: `{cm}`\n\n"
+        f"🛡 **ЗАЩИТА:**\n LB: `{lb}`\n RB: `{rb}`\n\n"
+        f" — — — — — — — — — — — —\n"
+        f" Нажмите на кнопку ниже, чтобы изменить позицию:"
     )
 
 @bot.message_handler(func=lambda m: m.text == "📋 Мой Состав")
