@@ -4,13 +4,12 @@ import random
 import time
 import json
 import os
-import threading
 
 # =========================
 # КОНФИГ
 # =========================
 
-TOKEN = "TOKEN_HERE"
+TOKEN = "8711407704:AAGZWhw8jXSjoofD2w7MlFJy-6_guVXYU0E"
 
 ADMINS = [
     "1674945230",
@@ -47,8 +46,6 @@ SQUAD_POSITIONS = [
 ]
 
 last_roll = {}
-match_cooldowns = {}
-pvp_queue = []
 
 BOT_TEAMS = [
     "🤖 Cyber FC",
@@ -96,6 +93,7 @@ def load_db(key):
 def save_db(data, key):
 
     with open(FILES[key], "w", encoding="utf-8") as f:
+
         json.dump(
             data,
             f,
@@ -118,29 +116,6 @@ def get_stars(count):
         return "⭐"
 
 
-def get_squad_rating(uid):
-
-    squads = load_db("squads")
-
-    squad = squads.get(uid, {})
-
-    total = 0
-    count = 0
-
-    for pos in SQUAD_POSITIONS:
-
-        if squad.get(pos):
-
-            try:
-                total += int(squad[pos]["ovr"])
-                count += 1
-
-            except:
-                pass
-
-    return total, count
-
-
 # =========================
 # КЛАВИАТУРА
 # =========================
@@ -154,11 +129,6 @@ def main_kb(user):
     markup.row(
         "Получить карту",
         "🗂 Коллекция"
-    )
-
-    markup.row(
-        "⚽️ Мой состав",
-        "⚔️ Матч"
     )
 
     markup.row(
@@ -191,16 +161,14 @@ def start(m):
 
         users[uid] = {
             "score": 0,
-            "username": m.from_user.username or f"user_{uid}",
-            "matches_played": 0,
-            "last_match_reset": time.time()
+            "username": m.from_user.username or f"user_{uid}"
         }
 
         save_db(users, "users")
 
     bot.send_message(
         m.chat.id,
-        "👋 Добро пожаловать в карточный футбольный бот!",
+        "👋 Добро пожаловать!",
         reply_markup=main_kb(m.from_user)
     )
 
@@ -236,9 +204,10 @@ def roll_card(m):
     cards = load_db("cards")
 
     if not cards:
+
         return bot.send_message(
             m.chat.id,
-            "❌ Карточек нет."
+            "❌ Карточек пока нет."
         )
 
     won = random.choice(cards)
@@ -399,65 +368,7 @@ def premium(m):
 
 
 # =========================
-# МОЙ СОСТАВ
-# =========================
-
-def get_user_squad(uid):
-
-    squads = load_db("squads")
-
-    if uid not in squads:
-
-        squads[uid] = {
-            pos: None
-            for pos in SQUAD_POSITIONS
-        }
-
-        save_db(squads, "squads")
-
-    return squads[uid]
-
-
-@bot.message_handler(func=lambda m: m.text == "⚽️ Мой состав")
-def my_squad(m):
-
-    uid = str(m.from_user.id)
-
-    squad = get_user_squad(uid)
-
-    total, count = get_squad_rating(uid)
-
-    avg = round(total / count, 1) if count > 0 else 0
-
-    text = (
-        f"⚽️ СОСТАВ\n\n"
-        f"📊 Средний OVR: {avg}\n\n"
-    )
-
-    for pos in SQUAD_POSITIONS:
-
-        player = squad.get(pos)
-
-        if player:
-
-            text += (
-                f"{pos} — "
-                f"{player['name']} "
-                f"({player['ovr']})\n"
-            )
-
-        else:
-
-            text += f"{pos} — Пусто\n"
-
-    bot.send_message(
-        m.chat.id,
-        text
-    )
-
-
-# =========================
-# АДМИНКА
+# АДМИН-ПАНЕЛЬ
 # =========================
 
 @bot.message_handler(func=lambda m: m.text == "🛠 Админ-панель")
@@ -481,7 +392,7 @@ def admin_panel(m):
 
 
 # =========================
-# ДОБАВЛЕНИЕ КАРТ
+# ДОБАВЛЕНИЕ КАРТЫ
 # =========================
 
 @bot.message_handler(func=lambda m: m.text == "➕ Добавить карту")
@@ -646,6 +557,6 @@ def back(m):
 
 if __name__ == "__main__":
 
-    print("Бот запущен!")
+    print("Бот успешно запущен!")
 
     bot.infinity_polling()
