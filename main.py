@@ -4,6 +4,7 @@ import random
 import time
 import json
 import os
+import threading
 
 # --- [1] КОНФИГУРАЦИЯ ---
 TOKEN = "8693121162:AAETyvJphmP-yreamHk-IXqshKqyMP0-3X8"
@@ -32,8 +33,15 @@ SQUAD_POSITIONS = ['LF', 'CF', 'RF', 'CM', 'LB', 'RB', 'GK']
 
 # Словари для хранения кулдаунов в памяти
 last_roll = {}
-match_cooldowns = {}  # Учет КД на матчи: {'uid_turbo': timestamp, 'uid_long45': timestamp}
-pvp_queue = []        # Очередь для матча 5 мин
+match_cooldowns = {}  # Учет КД на матчи
+pvp_queue = []        # Очередь для матча PVP
+
+# База случайных названий для ботов
+BOT_TEAMS = [
+    "🤖 Cyber FC", "🦾 Робот Юнайтед", "🧠 ИИ Сити", "⚡️ Нейро Атлетик", 
+    "👾 Пиксель ФК", "🛰 Спутник Спартак", "💻 Матрица Сити", "⚙️ ФК Вортекс"
+]
+BOT_TACTICS = ["Автобус 5-4-1", "Атакующая 4-3-3", "Сбалансированная 4-4-2", "Тотальный футбол 3-4-3"]
 
 # Текстовые заготовки для опасных моментов в Долгом матче
 MATCH_EVENTS = [
@@ -68,7 +76,6 @@ def is_admin_user(user):
     return str(user.id) in ADMINS
 
 def get_squad_rating(uid):
-    """Вспомогательная функция расчета общего OVR состава"""
     squads = load_db('squads')
     user_squad = squads.get(uid, {})
     total_ovr = 0
@@ -110,7 +117,6 @@ def start(m):
     bot.send_message(m.chat.id, "👋 Привет! Это бот СЛС карточек. Собирай состав и побеждай в матчах!", 
                      reply_markup=main_kb(m.from_user), parse_mode="Markdown")
 
-# Открытие паков
 @bot.message_handler(func=lambda m: m.text == "Получить карту")
 def roll_start(m):
     uid = str(m.from_user.id)
@@ -168,7 +174,6 @@ def pack_callback(call):
     try: bot.delete_message(call.message.chat.id, call.message.message_id)
     except: pass
 
-    # Обновленный вывод подписи к фото по вашему шаблону
     caption = (
         f"⚽️ **{won['name']}** ({"🆕 Новая карта!" if is_new else "♻️ Повторка"})\n"
         f"║ 📊 OVR: {won.get('ovr', '—')}\n"
@@ -274,7 +279,6 @@ def squad_back_inline(call):
 # --- [6] МЕНЮ МАТЧЕЙ И РЕЖИМЫ ---
 
 def check_match_limits(uid):
-    """Сброс и проверка дневных лимитов (7 матчей в день)"""
     users = load_db('users')
     if uid not in users: return True, 0
     
@@ -294,8 +298,8 @@ def check_match_limits(uid):
 def get_match_menu_kb():
     markup = types.InlineKeyboardMarkup()
     markup.row(types.InlineKeyboardButton(f"🚀 Турбо ({len(pvp_queue)} ищет)", callback_data="match_start_turbo"))
-    markup.row(types.InlineKeyboardButton("⏱ Долгий матч (45 сек) (0 ищет)", callback_data="match_start_long45"))
-    markup.row(types.InlineKeyboardButton(f"⏳ Долгий матч (5 мин) ({len(pvp_queue)} ищет)", callback_data="match_start_pvp"))
+    markup.row(types.InlineKeyboardButton("⏱ Долгий матч (45 сек)", callback_data="match_start_long45"))
+    markup.row(types.InlineKeyboardButton(f"⏳ PVP-Матч ({len(pvp_queue)} ищет)", callback_data="match_start_pvp"))
     markup.row(types.InlineKeyboardButton("⬅️ В меню", callback_data="match_to_menu"))
     return markup
 
@@ -310,19 +314,55 @@ def match_menu(m):
     can_play, played_count = check_match_limits(uid)
     
     text = (
-        f"⚔️ **ВЫБЕРИТЕ РЕЖИМ МАТЧА** ⚔️\n\n"
-        f"📊 **Ежедневный лимит:** `{played_count}/7`\n"
-        f" — — — — — — — — — — — — — — —\n\n"
-        f"🚀 **Турбо-матч (Авторасчет):** Быстрый матч без выборов. Кулдаун: 30 мин.\n"
-        f"⏱ **Долгий матч (45 сек):** 10 моментов, тактика и шансы. Кулдаун: 5 мин.\n"
-        f"⏳ **Долгий матч (5 мин):** Тот же H2H, но бот ищет оппонента до 5 мин и пингует в чат при нахождении!"
+        f"⚔️ **ЦЕНТР УПРАВЛЕНИЯ МАТЧАМИ** ⚔️\n\n"
+        f"📊 **🔋 Выносливость на сегодня:** сыграно `{played_count}/7` матчей\n"
+        f"📋 *Выбирай режим и веди свою команду к победе:* \n\n"
+        f"🚀 **Турбо-режим:**\n"
+        f"└ Мгновенный авторасчет результата против случайного ИИ-клуба. Идеально для быстрого фарма. *(КД: 30 мин.)*\n\n"
+        f"⏱ **Долгий матч (Live):**\n"
+        f"└ Полноценная текстовая трансляция игры против ИИ! 10 жарких моментов. *(КД: 5 мин.)*\n\n"
+        f"⏳ **PVP-Матч (H2H):**\n"
+        f"└ Игра против реального игрока! Если оппонент не найдется за 30 секунд, бот автоматически подберет вам ИИ-соперника."
     )
     
     try:
-        with open('465d12ab-8fc3-4bc1-853e-dd4c3a10de12.png', 'rb') as photo:
+        with open('Screenshot 2026-05-26 at 12.20.00.png', 'rb') as photo:
             bot.send_photo(m.chat.id, photo, caption=text, reply_markup=get_match_menu_kb(), parse_mode="Markdown")
     except FileNotFoundError:
         bot.send_message(m.chat.id, text, reply_markup=get_match_menu_kb(), parse_mode="Markdown")
+
+# Функция отложенного подбора бота, если реальный игрок долго не заходит
+def pvp_timeout_check(uid, chat_id):
+    time.sleep(30) # Время ожидания реального соперника (в секундах)
+    if uid in pvp_queue:
+        pvp_queue.remove(uid)
+        
+        # Генерируем случайного ИИ-соперника
+        bot_name = random.choice(BOT_TEAMS)
+        bot_tactic = random.choice(BOT_TACTICS)
+        
+        my_ovr, _ = get_squad_rating(uid)
+        bot_ovr = random.randint(max(55, my_ovr - 5), min(99, my_ovr + 8))
+        
+        bot.send_message(chat_id, f"🔍 Время ожидания истекло! Соперник из сети не найден.\n\n🤖 К вам на стадион прибыл скрытый ИИ-клуб: **{bot_name}** (`{bot_tactic}`, OVR {bot_ovr // 7})!")
+        
+        g1 = random.choices([0,1,2,3,4], weights=[20,35,25,15,5] if my_ovr >= bot_ovr else [35,30,20,10,5])[0]
+        g2 = random.choices([0,1,2,3,4], weights=[35,30,20,10,5] if my_ovr >= bot_ovr else [20,35,25,15,5])[0]
+        
+        users = load_db('users')
+        users[uid]['matches_played'] = users[uid].get('matches_played', 0) + 1
+        
+        if g1 > g2:
+            users[uid]['score'] += 3500
+            res = "🎉 **Великолепная победа над ИИ! (+3,500 очков)**"
+        elif g1 == g2:
+            users[uid]['score'] += 1500
+            res = "🤝 **Ничья в упорном сражении! (+1,500 очков)**"
+        else:
+            res = "📉 **ИИ оказался сильнее. Поражение. (0 очков)**"
+            
+        save_db(users, 'users')
+        bot.send_message(chat_id, f"🏁 **Итог Экстренного Матча:**\nВы *{g1}* : *{g2}* {bot_name}\n\n{res}", parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("match_"))
 def handle_match_callbacks(call):
@@ -339,7 +379,7 @@ def handle_match_callbacks(call):
     if not can_play and not is_admin_user(call.from_user):
         return bot.answer_callback_query(call.id, "❌ Вы исчерпали лимит матчей на сегодня (7/7)!", show_alert=True)
 
-    # 1. РЕЖИМ: ТУРБО
+    # 1. РЕЖИМ: ТУРБО (Случайный ИИ-бот)
     if action == "start_turbo":
         kd_key = f"{uid}_turbo"
         if kd_key in match_cooldowns and now - match_cooldowns[kd_key] < 1800 and not is_admin_user(call.from_user):
@@ -347,31 +387,43 @@ def handle_match_callbacks(call):
             return bot.answer_callback_query(call.id, f"⏳ Кулдаун! Подождите {remains // 60} мин.", show_alert=True)
         
         match_cooldowns[kd_key] = now
-        bot.answer_callback_query(call.id, "Запуск Турбо-матча...")
+        bot.answer_callback_query(call.id, "Генерируем случайного ИИ...")
+        
+        random_bot_name = random.choice(BOT_TEAMS)
+        random_bot_tactic = random.choice(BOT_TACTICS)
         
         my_ovr, _ = get_squad_rating(uid)
-        bot_ovr = random.randint(min(60, my_ovr - 5), my_ovr + 8)
+        bot_ovr = random.randint(max(55, my_ovr - 7), min(99, my_ovr + 8))
         
-        my_goals = random.choices([0, 1, 2, 3, 4, 5], weights=[15, 25, 30, 18, 9, 3] if my_ovr >= bot_ovr else [30, 30, 20, 12, 6, 2])[0]
-        bot_goals = random.choices([0, 1, 2, 3, 4, 5], weights=[30, 30, 20, 12, 6, 2] if my_ovr >= bot_ovr else [15, 25, 30, 18, 9, 3])[0]
+        if my_ovr >= bot_ovr:
+            my_goals = random.choices([0, 1, 2, 3, 4, 5], weights=[15, 25, 30, 18, 9, 3])[0]
+            bot_goals = random.choices([0, 1, 2, 3, 4, 5], weights=[30, 30, 20, 12, 6, 2])[0]
+        else:
+            my_goals = random.choices([0, 1, 2, 3, 4, 5], weights=[30, 30, 20, 12, 6, 2])[0]
+            bot_goals = random.choices([0, 1, 2, 3, 4, 5], weights=[15, 25, 30, 18, 9, 3])[0]
         
         users = load_db('users')
         users[uid]['matches_played'] = users[uid].get('matches_played', 0) + 1
         
         if my_goals > bot_goals:
-            res_text = "🎉 **ПОБЕДА!** Получено +1,500 очков."
+            res_text = f"🎉 **ПОБЕДА!** Получено +1,500 очков."
             users[uid]['score'] += 1500
         elif my_goals == bot_goals:
-            res_text = "🤝 **НИЧЬЯ!** Получено +500 очков."
+            res_text = f"🤝 **НИЧЬЯ!** Получено +500 очков."
             users[uid]['score'] += 500
         else:
-            res_text = "📉 **ПОРАЖЕНИЕ.** Очки не начислены."
+            res_text = f"📉 **ПОРАЖЕНИЕ.** Очки не начислены."
         
         save_db(users, 'users')
         
         result_msg = (
             f"🚀 **РЕЗУЛЬТАТ ТУРБО-МАТЧА**\n\n"
-            f"👥 Твоя команда (OVR {my_ovr // 7})  *{my_goals}* : *{bot_goals}* Бот-Оппонент (OVR {bot_ovr // 7})\n\n"
+            f"🟢 **Твоя команда** (OVR {my_ovr // 7})\n"
+            f" └  *{my_goals}* \n\n"
+            f"🔴 **{random_bot_name}** (OVR {bot_ovr // 7})\n"
+            f" ├ 📋 Тактика: `{random_bot_tactic}`\n"
+            f" └  *{bot_goals}* \n"
+            f" — — — — — — — — — — — —\n"
             f"{res_text}"
         )
         bot.edit_message_caption(result_msg, call.message.chat.id, call.message.message_id, reply_markup=get_match_menu_kb(), parse_mode="Markdown")
@@ -408,8 +460,7 @@ def handle_match_callbacks(call):
                 f"📊 Счет: *{my_score}* : *{bot_score}*\n\n"
                 f"{event}"
             )
-            try:
-                bot.edit_message_caption(step_text, call.message.chat.id, call.message.message_id, parse_mode="Markdown")
+            try: bot.edit_message_caption(step_text, call.message.chat.id, call.message.message_id, parse_mode="Markdown")
             except: pass
             time.sleep(3)
             
@@ -434,7 +485,7 @@ def handle_match_callbacks(call):
         )
         bot.send_message(call.message.chat.id, final_text, reply_markup=main_kb(call.from_user), parse_mode="Markdown")
 
-    # 3. РЕЖИМ: PVP (5 минут поиск)
+    # 3. РЕЖИМ: PVP (С автоподбором ИИ при долгом поиске)
     elif action == "start_pvp":
         if uid in pvp_queue:
             return bot.answer_callback_query(call.id, "🔎 Вы уже находитесь в поиске соперника!", show_alert=True)
@@ -453,7 +504,7 @@ def handle_match_callbacks(call):
             u1_name = users.get(p1, {}).get('username', f"id_{p1}")
             u2_name = users.get(p2, {}).get('username', f"id_{p2}")
             
-            match_found_text = f"🥅 **Соперник найден!**\n\n🟢 @{u1_name}  *VS* 🔴 @{u2_name}\n\nМатч симулируется..."
+            match_found_text = f"🥅 **Соперник найден! Реальный H2H!**\n\n🟢 @{u1_name}  *VS* 🔴 @{u2_name}\n\nМатч симулируется..."
             bot.send_message(p1, match_found_text, parse_mode="Markdown")
             bot.send_message(p2, match_found_text, parse_mode="Markdown")
             
@@ -481,6 +532,9 @@ def handle_match_callbacks(call):
             
             bot.send_message(p1, f"🏁 **Итог PVP-Матча:**\nВы *{g1}* : *{g2}* @{u2_name}\n\n{res_p1}", parse_mode="Markdown")
             bot.send_message(p2, f"🏁 **Итог PVP-Матча:**\nВы *{g2}* : *{g1}* @{u1_name}\n\n{res_p2}", parse_mode="Markdown")
+        else:
+            # Если игрок первый в очереди, запускаем фоновый таймер на 30 секунд
+            threading.Thread(target=pvp_timeout_check, args=(uid, call.message.chat.id), daemon=True).start()
 
 # --- [7] ОСТАЛЬНЫЕ КОМАНДЫ БОТА ---
 
@@ -602,5 +656,5 @@ def add_final(m, name, ovr, event, pos, rarity, stars):
 def back(m): bot.send_message(m.chat.id, "Главное меню:", reply_markup=main_kb(m.from_user))
 
 if __name__ == '__main__':
-    print("Бот запущен и готов к работе!")
+    print("Бот успешно запущен!")
     bot.infinity_polling()
