@@ -658,4 +658,3 @@ def back(m): bot.send_message(m.chat.id, "Главное меню:", reply_marku
 if __name__ == '__main__':
     print("Бот успешно запущен!")
     bot.infinity_polling()
-некоторые кнопки не работают и тупые
