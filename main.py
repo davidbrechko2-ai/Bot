@@ -81,11 +81,13 @@ def start(m):
     bot.send_message(m.chat.id, "👋 Привет! Это бот СЛС карточек с функцией менеджмента состава.", 
                      reply_markup=main_kb(m.from_user), parse_mode="Markdown")
 
+# МОМЕНТАЛЬНАЯ ВЫДАЧА КАРТЫ ПО КНОПКЕ
 @bot.message_handler(func=lambda m: m.text == "Получить карту")
-def roll_start(m):
+def roll_card_instantly(m):
     uid = str(m.from_user.id)
     is_admin = is_admin_user(m.from_user)
 
+    # Проверка КД
     if not is_admin:
         now = time.time()
         if uid in last_roll:
@@ -95,67 +97,26 @@ def roll_start(m):
                 mins = remains // 60
                 secs = remains % 60
                 return bot.send_message(m.chat.id, f"⏳ Нужно подождать еще {mins} мин. {secs} сек.", parse_mode="Markdown")
-
-    cards = load_db('cards')
-    if not cards: 
-        return bot.send_message(m.chat.id, "❌ В игре пока нет карточек! Добавьте их через админ-панель.")
-
-    markup = types.InlineKeyboardMarkup()
-    markup.row(types.InlineKeyboardButton("🎁 Открыть", callback_data="open_pack"))
-    markup.row(types.InlineKeyboardButton("⬅️ Отмена", callback_data="cancel_pack"))
-
-    try:
-        with open('465d12ab-8fc3-4bc1-853e-dd4c3a10de12.png', 'rb') as photo:
-            bot.send_photo(m.chat.id, photo, caption="🎁 **Бесплатный пак готов!**", reply_markup=markup, parse_mode="Markdown")
-    except FileNotFoundError:
-        bot.send_message(m.chat.id, "🎁 **Бесплатный пак готов!**", reply_markup=markup, parse_mode="Markdown")
-
-@bot.callback_query_handler(func=lambda call: call.data in ["open_pack", "cancel_pack"])
-def pack_callback(call):
-    uid = str(call.from_user.id)
-    
-    if call.data == "cancel_pack":
-        bot.answer_callback_query(call.id, "Открыто позже")
-        try: bot.delete_message(call.message.chat.id, call.message.message_id)
-        except: pass
-        return
-
-    is_admin = is_admin_user(call.from_user)
-    if not is_admin:
-        now = time.time()
-        if uid in last_roll:
-            elapsed = now - last_roll[uid]
-            if elapsed < COOLDOWN_TIME:
-                bot.answer_callback_query(call.id, "⏳ Кулдаун еще не прошел!", show_alert=True)
-                return
         last_roll[uid] = now
 
-    # Красивая системная загрузка сверху экрана
-    bot.answer_callback_query(call.id, "✨ Насыплет голду или легку?.. Открываем!", show_alert=False)
-
-    # Удаляем пак, чтобы сразу показать карту
-    try:
-        bot.delete_message(call.message.chat.id, call.message.message_id)
-    except:
-        pass
-
-    # --- ВЫДАЧА КАРТЫ ---
     cards = load_db('cards')
     users = load_db('users')
     colls = load_db('colls')
 
-    if not cards:
-        return bot.send_message(call.message.chat.id, "❌ Ошибка: база карт внезапно опустела.")
+    if not cards: 
+        return bot.send_message(m.chat.id, "❌ В игре пока нет карточек! Сначала добавьте их через Админ-панель.")
 
+    # Выбираем случайную карту
     won = random.choice(cards)
-    if uid not in colls: colls[uid] = []
+    if uid not in colls: 
+        colls[uid] = []
     
     is_new = not any(c['name'] == won['name'] for c in colls[uid])
     base_pts = STATS.get(int(won.get('stars', 1)), {"score": 500})["score"]
     added_pts = base_pts if is_new else int(base_pts * 0.3)
     
     if uid not in users:
-        users[uid] = {"score": 0, "username": call.from_user.username or f"user_{uid}"}
+        users[uid] = {"score": 0, "username": m.from_user.username or f"user_{uid}"}
 
     users[uid]['score'] += int(added_pts)
     if is_new:
@@ -177,10 +138,11 @@ def pack_callback(call):
     )
     
     try:
-        # Отправляем карту по её Telegram file_id (работает железно и быстро)
-        bot.send_photo(call.message.chat.id, won['photo'], caption=caption, parse_mode="Markdown")
+        # Пробуем отправить с фото
+        bot.send_photo(m.chat.id, won['photo'], caption=caption, parse_mode="Markdown")
     except Exception as e:
-        bot.send_message(call.message.chat.id, f"❌ Ошибка отправки фото (проверьте file_id карты):\n\n{caption}", parse_mode="Markdown")
+        # Железный запасной вариант: если фото устарело/сломалось, бот пришлет текст и не упадет
+        bot.send_message(m.chat.id, f"🏃‍♂️ **Карточка успешно выбита!** (Фото недоступно, передобавьте карту в админке)\n\n{caption}", parse_mode="Markdown")
 
 # --- [5] СИСТЕМА СОСТАВА ---
 
@@ -319,7 +281,7 @@ def my_collection(m):
     my_cards = colls.get(uid, [])
     
     if not my_cards:
-        return bot.send_message(m.chat.id, "🗂 Ваша收藏ция пока пуста!")
+        return bot.send_message(m.chat.id, "🗂 Ваша коллекция пока пуста!")
     
     text = f"🗂 **ВАША КОЛЛЕКЦИЯ ({len(my_cards)} шт.):**\n\n"
     for card in my_cards:
