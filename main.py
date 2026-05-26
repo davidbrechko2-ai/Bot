@@ -11,7 +11,7 @@ ADMINS = ["1674945230", "7908057052"]
 bot = telebot.TeleBot(TOKEN)
 
 # Настройка КД (в секундах).
-COOLDOWN_TIME = 3600 
+COOLDOWN_TIME = 5400 
 
 FILES = {
     'cards': 'cards_data.json', 
