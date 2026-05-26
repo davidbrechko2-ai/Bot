@@ -84,14 +84,12 @@ def roll_start(m):
     markup.row(types.InlineKeyboardButton("🎁 Открыть", callback_data="open_pack"))
     markup.row(types.InlineKeyboardButton("⬅️ Отмена", callback_data="cancel_pack"))
 
-    # Твоя картинка пака из репозитория GitHub
     pack_img = '465d12ab-8fc3-4bc1-853e-dd4c3a10de12.png'
     
     try:
         with open(pack_img, 'rb') as photo:
             bot.send_photo(m.chat.id, photo, caption="🎁 **Бесплатный пак готов!**", reply_markup=markup, parse_mode="Markdown")
     except Exception as e:
-        # Если вдруг файл не найден, бот отправит текст и кнопки, но НЕ упадет
         bot.send_message(m.chat.id, "🎁 **Бесплатный пак готов!**", reply_markup=markup, parse_mode="Markdown")
 
 # Обработка кнопок "🎁 Открыть" и "⬅️ Отмена"
@@ -107,7 +105,6 @@ def pack_callback(call):
 
     bot.answer_callback_query(call.id, "✨ Открываем пак...")
 
-    # Удаляем пак, чтобы на его месте показать выбитого игрока
     try: bot.delete_message(call.message.chat.id, call.message.message_id)
     except: pass
 
@@ -143,7 +140,7 @@ def pack_callback(call):
         f"║ ✨ {won.get('rarity', 'COMMON').upper()}\n"
         f" — — — — — — — — — —\n"
         f"📊 Рейтинг: {get_stars(won.get('stars', 1))}\n"
-        f"💠 Очки: +{int(added_pts):,} | Всего: {users[uid]['score']:,}"
+        f"💠 Очки: +{int(added_pts):?} | Всего: {users[uid]['score']:,}"
     )
     
     try:
@@ -202,7 +199,7 @@ def choose_player_for_pos(call):
     uid = str(call.from_user.id)
     target_pos = call.data.replace("pos_", "")
     colls = load_db('colls')
-    eligible_cards = [c for c in colls.get(uid, []) if c.get('pos', '').upper() == target_pos.upper()]
+    eligible_cards = [c for c in colls.get(uid, []) if str(c.get('pos', '')).upper() == target_pos.upper()]
     
     if not eligible_cards:
         bot.answer_callback_query(call.id, f"⚠️ У вас нет игроков на позицию {target_pos}!", show_alert=True)
@@ -252,14 +249,23 @@ def top_players(m):
         text += f"{medal} @{data['username']} — {data['score']:,} очков\n"
     bot.send_message(m.chat.id, text, parse_mode="Markdown")
 
+# Исправленная кнопка Коллекции
 @bot.message_handler(func=lambda m: m.text == "🗂 Коллекция")
 def my_collection(m):
     uid = str(m.from_user.id)
     my_cards = load_db('colls').get(uid, [])
-    if not my_cards: return bot.send_message(m.chat.id, "🗂 Ваша коллекция пока пуста!")
+    if not my_cards: 
+        return bot.send_message(m.chat.id, "🗂 Ваша коллекция пока пуста!")
+    
     text = f"🗂 **ВАША КОЛЛЕКЦИЯ ({len(my_cards)} шт.):**\n\n"
     for card in my_cards:
-        text += f"• {card['name']} | Поз: {card.get('pos', '—')} | OVR: {card.get('ovr', '—')} ({get_stars(card.get('stars', 1))})\n"
+        # Безопасное чтение ключей, чтобы бот не падал из-за старых сломанных карт
+        c_name = card.get('name', 'Без имени')
+        c_pos = card.get('pos', '—')
+        c_ovr = card.get('ovr', '—')
+        c_stars = get_stars(card.get('stars', 1))
+        text += f"• {c_name} | Поз: {c_pos} | OVR: {c_ovr} ({c_stars})\n"
+        
     bot.send_message(m.chat.id, text, parse_mode="Markdown")
 
 @bot.message_handler(func=lambda m: m.text == "👤 Профиль")
@@ -274,7 +280,7 @@ def profile(m):
 def prem(m):
     bot.send_message(m.chat.id, "💎 **Премиум статус**\n\n• Крутки без КД\n✉️ Купить: @verybigsun", parse_mode="Markdown")
 
-# --- АДМИН-ПАНЕЛЬ ---
+# --- АДМИН-ПАНЕЛЬ (ИСПРАВЛЕННЫЙ ПОРЯДОК ПЕРЕМЕННЫХ) ---
 @bot.message_handler(func=lambda m: m.text == "🛠 Админ-панель")
 def adm(m):
     if is_admin_user(m.from_user):
@@ -322,21 +328,30 @@ def add_step_rarity(m, name, ovr, event):
     bot.send_message(m.chat.id, f"5️⃣ Введите РЕДКОСТЬ (например: EPIC, LEGENDARY):")
     bot.register_next_step_handler(m, add_step_stars, name, ovr, event, m.text.upper())
 
-def add_step_stars(m, name, ovr, event, pos):
+def add_step_stars(m, name, ovr, event, rarity):
     bot.send_message(m.chat.id, f"6️⃣ Введите РЕЙТИНГ В ЗВЕЗДАХ (1-5):")
-    bot.register_next_step_handler(m, add_step_photo, name, ovr, event, pos, m.text)
+    bot.register_next_step_handler(m, add_step_photo, name, ovr, event, rarity, m.text)
 
-def add_step_photo(m, name, ovr, event, pos, rarity):
+def add_step_photo(m, name, ovr, event, rarity, stars):
     bot.send_message(m.chat.id, f"7️⃣ Теперь отправьте ФОТО карточки:")
-    bot.register_next_step_handler(m, add_final, name, ovr, event, pos, rarity, m.text)
+    bot.register_next_step_handler(m, add_final, name, ovr, event, rarity, stars)
 
-def add_final(m, name, ovr, event, pos, rarity, stars):
+def add_final(m, name, ovr, event, rarity, stars):
     if not m.photo:
         return bot.send_message(m.chat.id, "❌ Ошибка! Вы не отправили фото. Начните добавление заново.")
+    
+    # Позицию запрашивали на 4 шаге (это была переменная event в цепочке, теперь берем правильный порядок)
+    # На 3 шаге было событие, на 4 позиция, на 5 редкость, на 6 звезды. 
+    # Чтобы не запутаться в цепочке telebot, мы переназначили аргументы правильно:
     cards = load_db('cards')
     cards.append({
-        "name": name, "ovr": ovr, "event": event, "pos": pos, "rarity": rarity,
-        "stars": int(stars) if stars.isdigit() else 1, "photo": m.photo[-1].file_id
+        "name": name, 
+        "ovr": ovr, 
+        "event": event, # Событие
+        "pos": rarity,  # Позиция передалась в этот аргумент
+        "rarity": stars, # Редкость передалась сюда
+        "stars": int(m.text) if m.text.isdigit() else 1, 
+        "photo": m.photo[-1].file_id
     })
     save_db(cards, 'cards')
     bot.send_message(m.chat.id, f"✅ Карта *{name}* успешно создана!", reply_markup=main_kb(m.from_user), parse_mode="Markdown")
