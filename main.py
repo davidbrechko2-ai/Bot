@@ -10,7 +10,7 @@ TOKEN = "8693121162:AAETyvJphmP-yreamHk-IXqshKqyMP0-3X8"
 ADMINS = ["1674945230", "7908057052"] 
 bot = telebot.TeleBot(TOKEN)
 
-# Настройка КД (в секундах).
+# Настройка КД на получение карт (в секундах). 5400 сек = 1.5 часа.
 COOLDOWN_TIME = 5400 
 
 FILES = {
@@ -39,7 +39,7 @@ pvp_queue = []        # Очередь для матча 5 мин
 MATCH_EVENTS = [
     "🔥 {attacker} перехватывает мяч в центре поля и убегает в контратаку!",
     "🎯 {attacker} исполняет великолепный штрафной удар из-за пределов площадки!",
-    "комбо {attacker} разыгрывает красивую стеночку возле штрафной площади соперника!",
+    "🧱 {attacker} разыгрывает красивую стеночку возле штрафной площади соперника!",
     "🏃‍♂️ Нападающий команды {attacker} на огромной скорости обыгрывает защитника!",
     "📐 {attacker} подает угловой! В штрафной идет жесткая борьба за мяч!"
 ]
@@ -168,10 +168,13 @@ def pack_callback(call):
     try: bot.delete_message(call.message.chat.id, call.message.message_id)
     except: pass
 
+    # Обновленный вывод подписи к фото по вашему шаблону
     caption = (
         f"⚽️ **{won['name']}** ({"🆕 Новая карта!" if is_new else "♻️ Повторка"})\n"
-        f"║ 📊 OVR: `{won.get('ovr', '—')}`\n"
-        f"║ ⚽️ POSITION: `{won.get('pos', '—')}`\n"
+        f"║ 📊 OVR: {won.get('ovr', '—')}\n"
+        f"║ 🛡 {won.get('event', '—')}\n"
+        f"║ ⚽️ POSITION: {won.get('pos', '—')}\n"
+        f"║ ✨ {won.get('rarity', '—')}\n"
         f" — — — — — — — — — —\n"
         f"💠 Очки: +{int(added_pts):,} | Всего: {users[uid]['score']:,}"
     )
@@ -278,7 +281,6 @@ def check_match_limits(uid):
     user = users[uid]
     now = time.time()
     
-    # Если прошло больше суток (86400 сек) с момента последнего сброса — обновляем лимит
     if now - user.get('last_match_reset', 0) > 86400:
         user['matches_played'] = 0
         user['last_match_reset'] = now
@@ -333,12 +335,11 @@ def handle_match_callbacks(call):
         except: pass
         return bot.send_message(call.message.chat.id, "Вы вернулись в главное меню.", reply_markup=main_kb(call.from_user))
 
-    # Проверка общего лимита на игры
     can_play, _ = check_match_limits(uid)
     if not can_play and not is_admin_user(call.from_user):
         return bot.answer_callback_query(call.id, "❌ Вы исчерпали лимит матчей на сегодня (7/7)!", show_alert=True)
 
-    # 1. РЕЖИМ: ТУРБО-МАТЧ (Авторасчет)
+    # 1. РЕЖИМ: ТУРБО
     if action == "start_turbo":
         kd_key = f"{uid}_turbo"
         if kd_key in match_cooldowns and now - match_cooldowns[kd_key] < 1800 and not is_admin_user(call.from_user):
@@ -348,11 +349,9 @@ def handle_match_callbacks(call):
         match_cooldowns[kd_key] = now
         bot.answer_callback_query(call.id, "Запуск Турбо-матча...")
         
-        # Симулируем расчет против бота
         my_ovr, _ = get_squad_rating(uid)
         bot_ovr = random.randint(min(60, my_ovr - 5), my_ovr + 8)
         
-        # Расчет шансов на основе разницы OVR
         my_goals = random.choices([0, 1, 2, 3, 4, 5], weights=[15, 25, 30, 18, 9, 3] if my_ovr >= bot_ovr else [30, 30, 20, 12, 6, 2])[0]
         bot_goals = random.choices([0, 1, 2, 3, 4, 5], weights=[30, 30, 20, 12, 6, 2] if my_ovr >= bot_ovr else [15, 25, 30, 18, 9, 3])[0]
         
@@ -377,7 +376,7 @@ def handle_match_callbacks(call):
         )
         bot.edit_message_caption(result_msg, call.message.chat.id, call.message.message_id, reply_markup=get_match_menu_kb(), parse_mode="Markdown")
 
-    # 2. РЕЖИМ: ДОЛГИЙ МАТЧ (45 секунд текстовой трансляции)
+    # 2. РЕЖИМ: ДОЛГИЙ МАТЧ (45 сек)
     elif action == "start_long45":
         kd_key = f"{uid}_long45"
         if kd_key in match_cooldowns and now - match_cooldowns[kd_key] < 300 and not is_admin_user(call.from_user):
@@ -390,10 +389,8 @@ def handle_match_callbacks(call):
         my_ovr, _ = get_squad_rating(uid)
         bot_ovr = random.randint(max(50, my_ovr - 10), my_ovr + 10)
         
-        my_score = 0
-        bot_score = 0
+        my_score, bot_score = 0, 0
         
-        # Симулируем 10 опасных моментов пошагово
         for minute in range(9, 91, 9):
             attacker = "Вы" if random.randint(0, my_ovr + bot_ovr) <= my_ovr else "Бот"
             event = random.choice(MATCH_EVENTS).format(attacker="Ваша команда" if attacker == "Вы" else "Команда Бота")
@@ -414,7 +411,7 @@ def handle_match_callbacks(call):
             try:
                 bot.edit_message_caption(step_text, call.message.chat.id, call.message.message_id, parse_mode="Markdown")
             except: pass
-            time.sleep(3) # задержка между моментами матча
+            time.sleep(3)
             
         users = load_db('users')
         users[uid]['matches_played'] = users[uid].get('matches_played', 0) + 1
@@ -437,7 +434,7 @@ def handle_match_callbacks(call):
         )
         bot.send_message(call.message.chat.id, final_text, reply_markup=main_kb(call.from_user), parse_mode="Markdown")
 
-    # 3. РЕЖИМ: ДОЛГИЙ МАТЧ (PVP Поиск 5 минут)
+    # 3. РЕЖИМ: PVP (5 минут поиск)
     elif action == "start_pvp":
         if uid in pvp_queue:
             return bot.answer_callback_query(call.id, "🔎 Вы уже находитесь в поиске соперника!", show_alert=True)
@@ -445,11 +442,9 @@ def handle_match_callbacks(call):
         bot.answer_callback_query(call.id, "Встаем в очередь поиска...")
         pvp_queue.append(uid)
         
-        # Обновляем плашку поиска для текущего юзера
         try: bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=get_match_menu_kb())
         except: pass
         
-        # Проверяем, набралась ли пара
         if len(pvp_queue) >= 2:
             p1 = pvp_queue.pop(0)
             p2 = pvp_queue.pop(0)
@@ -458,7 +453,6 @@ def handle_match_callbacks(call):
             u1_name = users.get(p1, {}).get('username', f"id_{p1}")
             u2_name = users.get(p2, {}).get('username', f"id_{p2}")
             
-            # Уведомляем обоих игроков в личные сообщения о нахождении игры
             match_found_text = f"🥅 **Соперник найден!**\n\n🟢 @{u1_name}  *VS* 🔴 @{u2_name}\n\nМатч симулируется..."
             bot.send_message(p1, match_found_text, parse_mode="Markdown")
             bot.send_message(p2, match_found_text, parse_mode="Markdown")
@@ -466,7 +460,6 @@ def handle_match_callbacks(call):
             ovr1, _ = get_squad_rating(p1)
             ovr2, _ = get_squad_rating(p2)
             
-            # Итоговый счет матча
             g1 = random.choices([0,1,2,3,4], weights=[20,35,25,15,5] if ovr1 >= ovr2 else [35,30,20,10,5])[0]
             g2 = random.choices([0,1,2,3,4], weights=[35,30,20,10,5] if ovr1 >= ovr2 else [20,35,25,15,5])[0]
             
