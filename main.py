@@ -11,7 +11,7 @@ import sys
 # ==============================================================================
 
 # Ваш уникальный токен бота
-TOKEN = "8711407704:AAGZWhw8jXSjoofD2w7MlFJy-6_guVXYU0E"
+TOKEN = "8886116833:AAEDyyrYKXH3WtY2BBFCOe4lZcaqlYBEaXY"
 
 # Список администраторов по их цифровым Telegram ID
 ADMINS = [7908057052, 1674945230] 
