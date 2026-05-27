@@ -11,10 +11,10 @@ import sys
 # ==============================================================================
 
 # Ваш уникальный токен бота
-TOKEN = "8886116833:AAEDyyrYKXH3WtY2BBFCOe4lZcaqlYBEaXY"
+TOKEN = "8711407704:AAGZWhw8jXSjoofD2w7MlFJy-6_guVXYU0E"
 
-# Список администраторов (Для безопасности рекомендуется заменить на ID, например: [12345678, 87654321])
-ADMINS = ["verybigsunr", "Ravgant"] 
+# Список администраторов по их цифровым Telegram ID
+ADMINS = [7908057052, 1674945230] 
 
 bot = telebot.TeleBot(TOKEN)
 
@@ -94,13 +94,8 @@ def save_data(data_object, key):
 # ==============================================================================
 
 def check_admin_permission(user_obj):
-    if user_obj.username is None:
-        return False
-    current_username = user_obj.username.lower()
-    for admin_name in ADMINS:
-        if admin_name.lower() == current_username:
-            return True
-    return False
+    # Прямая и надежная проверка ID по списку администраторов
+    return user_obj.id in ADMINS
 
 def check_ban_status(user_obj):
     ban_list = load_data('bans')
@@ -140,13 +135,14 @@ def create_main_menu(user_id):
     markup.add(btn_roll, btn_collection, btn_squad, btn_profile)
     markup.add(btn_top, btn_pvp, btn_promo, btn_referrals)
     
-    try:
-        chat_info = bot.get_chat(user_id)
-        if check_admin_permission(chat_info):
-            btn_admin = types.KeyboardButton("🛠 Админ-панель")
-            markup.add(btn_admin)
-    except:
-        pass
+    # Внутренний класс для быстрой проверки прав без запросов к серверам Telegram
+    class SimpleUser:
+        def __init__(self, uid):
+            self.id = uid
+
+    if check_admin_permission(SimpleUser(user_id)):
+        btn_admin = types.KeyboardButton("🛠 Админ-панель")
+        markup.add(btn_admin)
         
     return markup
 
@@ -290,6 +286,7 @@ def roll_card_handler(message):
     current_time_stamp = time.time()
     bonus_rolls = users_db[user_id_key].get('free_rolls', 0)
     
+    # Администраторы могут крутить без ограничений по времени
     if not check_admin_permission(message.from_user) and bonus_rolls <= 0:
         if user_id_key in roll_cooldowns and current_time_stamp - roll_cooldowns[user_id_key] < 10800:
             rem = int(10800 - (current_time_stamp - roll_cooldowns[user_id_key]))
