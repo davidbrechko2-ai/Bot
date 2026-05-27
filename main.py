@@ -10,10 +10,7 @@ import sys
 # [1] ГЛОБАЛЬНЫЕ НАСТРОЙКИ И ИНИЦИАЛИЗАЦИЯ
 # ==============================================================================
 
-# Ваш уникальный токен бота
 TOKEN = "8886116833:AAEDyyrYKXH3WtY2BBFCOe4lZcaqlYBEaXY"
-
-# Список администраторов по их цифровым Telegram ID
 ADMINS = [7908057052, 1674945230] 
 
 bot = telebot.TeleBot(TOKEN)
@@ -94,7 +91,6 @@ def save_data(data_object, key):
 # ==============================================================================
 
 def check_admin_permission(user_obj):
-    # Прямая и надежная проверка ID по списку администраторов
     return user_obj.id in ADMINS
 
 def check_ban_status(user_obj):
@@ -135,7 +131,6 @@ def create_main_menu(user_id):
     markup.add(btn_roll, btn_collection, btn_squad, btn_profile)
     markup.add(btn_top, btn_pvp, btn_promo, btn_referrals)
     
-    # Внутренний класс для быстрой проверки прав без запросов к серверам Telegram
     class SimpleUser:
         def __init__(self, uid):
             self.id = uid
@@ -148,7 +143,7 @@ def create_main_menu(user_id):
 
 def create_admin_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    markup.add(types.KeyboardButton("➕ Добавить карту"), types.KeyboardButton("📝 Изменить карту"), types.KeyboardButton("🗑 Удалить карту"))
+    markup.add(types.KeyboardButton("➕ Добавить карту"), types.KeyboardButton("🗑 Удалить карту"))
     markup.add(types.KeyboardButton("🎟 +Промокод"), types.KeyboardButton("🗑 Удалить промокод"))
     markup.add(types.KeyboardButton("🚫 Забанить"), types.KeyboardButton("✅ Разбанить"))
     markup.add(types.KeyboardButton("🧨 Обнулить бота"), types.KeyboardButton("🏠 Назад в меню"))
@@ -160,7 +155,7 @@ def create_cancel_menu():
     return markup
 
 # ==============================================================================
-# [6] ОБРАБОТКА КОМАНД И РЕФЕРАЛОВ
+# [6] ОБРАБОТКА КОМАНД И ВХОД В АДМИНКУ (ПРИОРИТЕТНЫЕ)
 # ==============================================================================
 
 @bot.message_handler(commands=['start'])
@@ -202,9 +197,24 @@ def start_message_handler(message):
                 print(f"Не удалось отправить уведомление рефереру: {e}")
 
     save_data(users_database, 'users')
-    
     welcome_text = "⚽️ **Приветствую, {}!**\n\nВы попали в симулятор футбольных карточек.\nИспользуйте меню ниже для игры!".format(message.from_user.first_name)
     bot.send_message(message.chat.id, welcome_text, reply_markup=create_main_menu(message.from_user.id), parse_mode="Markdown")
+
+# ПЕРЕНЕСЕНО НАВЕРХ: Теперь кнопка админа перехватывает управление первой
+@bot.message_handler(func=lambda m: m.text == "🛠 Админ-панель")
+def admin_panel_handler(message):
+    bot.clear_step_handler_by_chat_id(chat_id=message.chat.id) # Сбрасываем прошлые шаги ожидания текста, если они зависли
+    if check_admin_permission(message.from_user):
+        bot.send_message(message.chat.id, "🛠 Панель администратора открыта:", reply_markup=create_admin_menu())
+
+@bot.message_handler(func=lambda m: m.text == "🏠 Назад в меню")
+def back_to_menu_handler(message):
+    bot.clear_step_handler_by_chat_id(chat_id=message.chat.id)
+    bot.send_message(message.chat.id, "🏠 Вы вернулись в главное меню", reply_markup=create_main_menu(message.from_user.id))
+
+# ==============================================================================
+# [7] ИГРОВЫЕ КНОПКИ МЕНЮ
+# ==============================================================================
 
 @bot.message_handler(func=lambda m: m.text == "👥 Рефералы")
 def referral_stats_handler(message):
@@ -218,10 +228,6 @@ def referral_stats_handler(message):
     
     referral_text = f"👥 **РЕФЕРАЛЬНАЯ ПРОГРАММА**\n\nПриглашайте друзей!\n🎁 **Награда:**\n— **5,000 очков**\n— **3 прокрута**\n\nПриглашено: **{ref_count}**\nСсылка:\n`{invite_link}`"
     bot.send_message(message.chat.id, referral_text, parse_mode="Markdown")
-
-# ==============================================================================
-# [7] МОДУЛЬ ПРОМОКОДОВ
-# ==============================================================================
 
 @bot.message_handler(func=lambda m: m.text == "🎟 Промокод")
 def promo_input_start(message):
@@ -268,10 +274,6 @@ def process_promo_logic(message):
     save_data(users_db, 'users')
     bot.send_message(message.chat.id, success_msg, reply_markup=create_main_menu(message.from_user.id), parse_mode="Markdown")
 
-# ==============================================================================
-# [8] СИСТЕМА ПРОКРУТОВ (ROLL)
-# ==============================================================================
-
 @bot.message_handler(func=lambda m: m.text == "🎰 Крутить карту")
 def roll_card_handler(message):
     if check_ban_status(message.from_user): return
@@ -286,7 +288,6 @@ def roll_card_handler(message):
     current_time_stamp = time.time()
     bonus_rolls = users_db[user_id_key].get('free_rolls', 0)
     
-    # Администраторы могут крутить без ограничений по времени
     if not check_admin_permission(message.from_user) and bonus_rolls <= 0:
         if user_id_key in roll_cooldowns and current_time_stamp - roll_cooldowns[user_id_key] < 10800:
             rem = int(10800 - (current_time_stamp - roll_cooldowns[user_id_key]))
@@ -332,7 +333,7 @@ def roll_card_handler(message):
         bot.send_message(message.chat.id, f"🏆 Вы выиграли карту: {won_card['name']}\n{caption}", parse_mode="Markdown")
 
 # ==============================================================================
-# [9] МОДУЛЬ ПВП (БОИ С ДРУГИМИ ИГРОКАМИ)
+# [8] МОДУЛЬ ПВП (БОИ С ДРУГИМИ ИГРОКАМИ)
 # ==============================================================================
 
 @bot.message_handler(func=lambda m: m.text == "🏟 ПВП Арена")
@@ -375,6 +376,14 @@ def process_pvp_search_by_input(message):
     if message.text == "❌ Отмена":
         bot.send_message(message.chat.id, "Отменено.", reply_markup=create_main_menu(message.from_user.id))
         return
+        
+    # ЕСЛИ ПОЛЬЗОВАТЕЛЬ НАЖАЛ НА ДРУГУЮ КНОПКУ ВМЕСТО ВВОДА ТЕКСТА
+    if message.text in ["🎰 Крутить карту", "🛠 Админ-панель", "🗂 Коллекция", "📋 Состав", "👤 Профиль", "🏆 Топ очков", "🏟 ПВП Арена", "🎟 Промокод", "👥 Рефералы"]:
+        bot.clear_step_handler_by_chat_id(chat_id=message.chat.id)
+        if message.text == "🛠 Админ-панель":
+            admin_panel_handler(message)
+        return
+
     query = message.text.replace("@", "").lower().strip()
     users_db = load_data('users')
     p1 = str(message.from_user.id)
@@ -404,7 +413,7 @@ def run_match_logic(chat_id, p1, p2):
     bot.send_message(chat_id, f"🏆 Победитель: {users_db[winner]['username']} (+1,000 очков)", reply_markup=create_main_menu(p1))
 
 # ==============================================================================
-# [10] ПРОФИЛЬ, ТОП И ПРОСМОТР АЛЬБОМОВ
+# [9] ПРОФИЛЬ, ТОП И ПРОСМОТР АЛЬБОМОВ
 # ==============================================================================
 
 @bot.message_handler(func=lambda m: m.text == "👤 Профиль")
@@ -434,14 +443,149 @@ def collection_menu_handler(message):
 def squad_menu_handler(message):
     bot.send_message(message.chat.id, "📋 Раздел управления составом находится в разработке.", reply_markup=create_main_menu(message.from_user.id))
 
-@bot.message_handler(func=lambda m: m.text == "🛠 Админ-панель")
-def admin_panel_handler(message):
-    if check_admin_permission(message.from_user):
-        bot.send_message(message.chat.id, "🛠 Панель администратора:", reply_markup=create_admin_menu())
+# ==============================================================================
+# [10] УПРАВЛЕНИЕ АДМИН-ПАНЕЛЬЮ (ОБРАБОТЧИКИ ДЕЙСТВИЙ)
+# ==============================================================================
 
-@bot.message_handler(func=lambda m: m.text == "🏠 Назад в меню")
-def back_to_menu_handler(message):
-    bot.send_message(message.chat.id, "🏠 Вы вернулись в главное меню", reply_markup=create_main_menu(message.from_user.id))
+@bot.message_handler(func=lambda m: m.text == "➕ Добавить карту")
+def admin_add_card_start(message):
+    if not check_admin_permission(message.from_user): return
+    sent_msg = bot.send_message(message.chat.id, "Введите данные карты через запятую в формате:\n`Имя, Позиция (ГК/ЛЗ/ПЗ/ЦП/ЛВ/ПВ/КФ), Редкость (1-5), URL картинки`", parse_mode="Markdown", reply_markup=create_cancel_menu())
+    bot.register_next_step_handler(sent_msg, admin_add_card_save)
+
+def admin_add_card_save(message):
+    if message.text == "❌ Отмена":
+        bot.send_message(message.chat.id, "Действие отменено.", reply_markup=create_admin_menu())
+        return
+    try:
+        parts = [p.strip() for p in message.text.split(',')]
+        name, pos, rarity, photo = parts[0], parts[1], int(parts[2]), parts[3]
+        
+        cards = load_data('cards')
+        cards.append({"name": name, "position": pos, "stars": rarity, "photo": photo})
+        save_data(cards, 'cards')
+        
+        bot.send_message(message.chat.id, f"✅ Карта *{name}* успешно добавлена!", parse_mode="Markdown", reply_markup=create_admin_menu())
+    except:
+        bot.send_message(message.chat.id, "❌ Ошибка формата. Попробуйте еще раз.", reply_markup=create_admin_menu())
+
+@bot.message_handler(func=lambda m: m.text == "🗑 Удалить карту")
+def admin_delete_card_start(message):
+    if not check_admin_permission(message.from_user): return
+    sent_msg = bot.send_message(message.chat.id, "Введите *точное имя* карты, которую нужно удалить:", parse_mode="Markdown", reply_markup=create_cancel_menu())
+    bot.register_next_step_handler(sent_msg, admin_delete_card_save)
+
+def admin_delete_card_save(message):
+    if message.text == "❌ Отмена":
+        bot.send_message(message.chat.id, "Действие отменено.", reply_markup=create_admin_menu())
+        return
+    cards = load_data('cards')
+    initial_len = len(cards)
+    cards = [c for c in cards if c['name'].lower() != message.text.strip().lower()]
+    
+    if len(cards) < initial_len:
+        save_data(cards, 'cards')
+        bot.send_message(message.chat.id, "✅ Карта успешно удалена из базы.", reply_markup=create_admin_menu())
+    else:
+        bot.send_message(message.chat.id, "❌ Карта с таким именем не найдена.", reply_markup=create_admin_menu())
+
+@bot.message_handler(func=lambda m: m.text == "🎟 +Промокод")
+def admin_add_promo_start(message):
+    if not check_admin_permission(message.from_user): return
+    sent_msg = bot.send_message(message.chat.id, "Введите данные промокода в формате:\n`КОД, тип (score/rolls/luck), значение`", parse_mode="Markdown", reply_markup=create_cancel_menu())
+    bot.register_next_step_handler(sent_msg, admin_add_promo_save)
+
+def admin_add_promo_save(message):
+    if message.text == "❌ Отмена":
+        bot.send_message(message.chat.id, "Действие отменено.", reply_markup=create_admin_menu())
+        return
+    try:
+        parts = [p.strip() for p in message.text.split(',')]
+        code, p_type, val = parts[0].upper(), parts[1].lower(), parts[2]
+        
+        promos = load_data('promos')
+        promos[code] = {"type": p_type, "value": val}
+        save_data(promos, 'promos')
+        
+        bot.send_message(message.chat.id, f"✅ Промокод *{code}* добавлен!", parse_mode="Markdown", reply_markup=create_admin_menu())
+    except:
+        bot.send_message(message.chat.id, "❌ Ошибка формата. Проверьте правильность ввода.", reply_markup=create_admin_menu())
+
+@bot.message_handler(func=lambda m: m.text == "🗑 Удалить промокод")
+def admin_delete_promo_start(message):
+    if not check_admin_permission(message.from_user): return
+    sent_msg = bot.send_message(message.chat.id, "Введите промокод для удаления:", reply_markup=create_cancel_menu())
+    bot.register_next_step_handler(sent_msg, admin_delete_promo_save)
+
+def admin_delete_promo_save(message):
+    if message.text == "❌ Отмена":
+        bot.send_message(message.chat.id, "Действие отменено.", reply_markup=create_admin_menu())
+        return
+    promos = load_data('promos')
+    code_to_del = message.text.strip().upper()
+    if code_to_del in promos:
+        del promos[code_to_del]
+        save_data(promos, 'promos')
+        bot.send_message(message.chat.id, f"✅ Промокод {code_to_del} удален.", reply_markup=create_admin_menu())
+    else:
+        bot.send_message(message.chat.id, "❌ Промокод не найден.", reply_markup=create_admin_menu())
+
+@bot.message_handler(func=lambda m: m.text == "🚫 Забанить")
+def admin_ban_user_start(message):
+    if not check_admin_permission(message.from_user): return
+    sent_msg = bot.send_message(message.chat.id, "Введите ID или username пользователя для блокировки:", reply_markup=create_cancel_menu())
+    bot.register_next_step_handler(sent_msg, admin_ban_user_save)
+
+def admin_ban_user_save(message):
+    if message.text == "❌ Отмена":
+        bot.send_message(message.chat.id, "Действие отменено.", reply_markup=create_admin_menu())
+        return
+    target = message.text.replace("@", "").strip().lower()
+    bans = load_data('bans')
+    if target not in bans:
+        bans.append(target)
+        save_data(bans, 'bans')
+        bot.send_message(message.chat.id, f"🚫 Пользователь {target} заблокирован.", reply_markup=create_admin_menu())
+    else:
+        bot.send_message(message.chat.id, "Игрок уже в бане.", reply_markup=create_admin_menu())
+
+@bot.message_handler(func=lambda m: m.text == "✅ Разбанить")
+def admin_unban_user_start(message):
+    if not check_admin_permission(message.from_user): return
+    sent_msg = bot.send_message(message.chat.id, "Введите ID или username пользователя для разблокировки:", reply_markup=create_cancel_menu())
+    bot.register_next_step_handler(sent_msg, admin_unban_user_save)
+
+def admin_unban_user_save(message):
+    if message.text == "❌ Отмена":
+        bot.send_message(message.chat.id, "Действие отменено.", reply_markup=create_admin_menu())
+        return
+    target = message.text.replace("@", "").strip().lower()
+    bans = load_data('bans')
+    if target in bans:
+        bans.remove(target)
+        save_data(bans, 'bans')
+        bot.send_message(message.chat.id, f"✅ Пользователь {target} разблокирован.", reply_markup=create_admin_menu())
+    else:
+        bot.send_message(message.chat.id, "Пользователь не найден в черном списке.", reply_markup=create_admin_menu())
+
+@bot.message_handler(func=lambda m: m.text == "🧨 Обнулить бота")
+def admin_wipe_start(message):
+    if not check_admin_permission(message.from_user): return
+    sent_msg = bot.send_message(message.chat.id, "⚠️ Вы уверены, что хотите вайпнуть ВСЕХ игроков? Напишите `ДА` для подтверждения или нажмите Отмена.", parse_mode="Markdown", reply_markup=create_cancel_menu())
+    bot.register_next_step_handler(sent_msg, admin_wipe_confirm)
+
+def admin_wipe_confirm(message):
+    if message.text == "ДА":
+        save_data({}, 'users')
+        save_data({}, 'colls')
+        save_data({}, 'squads')
+        bot.send_message(message.chat.id, "🧨 База данных полностью обнулена!", reply_markup=create_admin_menu())
+    else:
+        bot.send_message(message.chat.id, "Обнуление отменено.", reply_markup=create_admin_menu())
+
+# ==============================================================================
+# ЗАПУСК
+# ==============================================================================
 
 if __name__ == '__main__':
     print("Бот успешно запущен!")
