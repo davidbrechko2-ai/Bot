@@ -1652,7 +1652,7 @@ def default_fallback_text_handler(message):
         "❓ **Неизвестная команда.**\n\n"
         "Пожалуйста, используйте встроенные интерактивные кнопки графического меню "
         "для стабильного управления симулятором футбольных карточек.",
-        reply_markup=create_main_menu(message.from_user.id),
+        eply_markup=create_main_menu(message.from_user.id),
         parse_mode="Markdown"
     )
 
