@@ -5,7 +5,7 @@ import time
 import json
 import os
 import sys
-import logging
+import loggin
 
 # ==============================================================================
 # [1] НАСТРОЙКА СИСТЕМНОГО ЛОГИРОВАНИЯ
