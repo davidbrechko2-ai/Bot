@@ -25,7 +25,7 @@ logger = logging.getLogger("FootballBotCore")
 # ==============================================================================
 
 # Уникальный токен вашего Telegram бота
-TOKEN = "8359038333:AAGJsCswTmItZ77qcdPbCaEBV8safgGei9A"
+TOKEN = "8834454809:AAGwW6gfVziVZ1u-gplIwI1DLt1ZJBBMVeE"
 
 # Список администраторов (цифровые Telegram ID)
 ADMINS = [7908057052, 1674945230]
