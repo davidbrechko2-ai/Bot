@@ -2,7 +2,7 @@ import telebot
 from telebot import types
 import random
 import time
-import jso
+import json
 import os
 import sys
 import logging
