@@ -24,7 +24,7 @@ logger = logging.getLogger("FootballBotCore")
 # [2] ГЛОБАЛЬНЫЕ НАСТРОЙКИ И ИНИЦИАЛИЗАЦИЯ БОТА
 # ==============================================================================
 
-# ВСТАВЬ СЮДА СВОЙ ТОКЕН ОТ BOTFATHER
+# Уникальный токен вашего Telegram бота
 TOKEN = "8834454809:AAGwW6gfVziVZ1u-gplIwI1DLt1ZJBBMVeE"
 
 # Список администраторов (цифровые Telegram ID)
@@ -46,6 +46,7 @@ DB_FILES = {
 # [3] ИГРОВЫЕ ПАРАМЕТРЫ И КОНФИГУРАЦИЯ БАЛАНСА
 # ==============================================================================
 
+# Характеристики редкостей карт, шансы выпадения и сила атаки
 RARITY_STATS = {
     1: {"chance": 35, "score": 1000, "atk": 100, "label": "Обычная"},
     2: {"chance": 30, "score": 3000, "atk": 450, "label": "Необычная"},
@@ -54,6 +55,7 @@ RARITY_STATS = {
     5: {"chance": 5, "score": 30000, "atk": 5000, "label": "Легендарная"}
 }
 
+# Декодирование футбольных позиций на русский язык
 POSITIONS_RU = {
     "ГК": "Вратарь", 
     "ЛЗ": "Левый Защитник", 
@@ -64,6 +66,7 @@ POSITIONS_RU = {
     "КФ": "Нападающий"
 }
 
+# Конфигурация слотов игрового состава (7 позиций)
 SQUAD_SLOTS = {
     0: {"label": "🧤 ГК (Вратарь)", "code": "ГК"},
     1: {"label": "🛡 ЛЗ (Защитник)", "code": "ЛЗ"},
@@ -74,8 +77,11 @@ SQUAD_SLOTS = {
     6: {"label": "🎯 КФ (Нападающий)", "code": "КФ"}
 }
 
+# Глобальные словари для отслеживания времени перезарядки действий (Cooldowns)
 roll_cooldowns = {}
 pvp_cooldowns = {}
+
+# Очередь поиска онлайн-матчей (хранит ID игроков, ожидающих игру)
 online_matchmaking_queue = []
 
 # ==============================================================================
@@ -95,6 +101,7 @@ def initialize_database_files():
             except IOError as e:
                 logger.critical(f"Не удалось инициализировать файл {file_name}: {e}")
 
+# Запуск первичной инициализации при импорте модуля
 initialize_database_files()
 
 
@@ -260,6 +267,7 @@ def create_cancel_menu():
 
 
 def create_pvp_menu():
+    """Инлайн-меню для выбора режима ПВП матча."""
     markup = types.InlineKeyboardMarkup(row_width=1)
     btn_bot_match = types.InlineKeyboardButton("🤖 Быстрый матч (с ботом)", callback_data="pvp_mode_bot")
     btn_online_match = types.InlineKeyboardButton("🔎 Искать онлайн-матч (живой игрок)", callback_data="pvp_mode_online")
@@ -278,7 +286,7 @@ def start_message_handler(message):
 
     users_database = load_data('users')
     user_id_key = str(message.from_user.id)
-    log_action(user_id_key, "START_COMMAND_TRIGGERED")
+    log_action(user_id_key, f"START_COMMAND_TRIGGERED")
 
     inviter_id = None
     command_parts = message.text.split()
@@ -415,7 +423,7 @@ def process_promo_logic(message):
     bot.send_message(message.chat.id, success_msg, reply_markup=create_main_menu(message.from_user.id), parse_mode="Markdown")
 
 # ==============================================================================
-# [9] СИСТЕМА ПРОКРУТОВ КАРТ (КД 2 ЧАСА)
+# [9] СИСТЕМА ПРОКРУТОВ КАРТ (КД 2 ЧАСА) — ИСПРАВЛЕНО И ПЕРЕВЕДЕНО НА HTML
 # ==============================================================================
 
 @bot.message_handler(func=lambda m: m.text == "🎰 Крутить карту")
@@ -434,6 +442,7 @@ def roll_card_handler(message):
     current_time_stamp = time.time()
     bonus_rolls = users_db.get(user_id_key, {}).get('free_rolls', 0)
     
+    # Кулдаун 2 часа
     if not check_admin_permission(message.from_user) and bonus_rolls <= 0:
         if user_id_key in roll_cooldowns:
             elapsed_time = current_time_stamp - roll_cooldowns[user_id_key]
@@ -466,10 +475,10 @@ def roll_card_handler(message):
         
     if bonus_rolls > 0:
         users_db[user_id_key]['free_rolls'] -= 1
-        attempt_info_text = f"🎫 Осталось бонусных прокрутов: **{users_db[user_id_key]['free_rolls']}** шт."
+        attempt_info_text = f"🎫 Осталось бонусных прокрутов: <b>{users_db[user_id_key]['free_rolls']}</b> шт."
     else:
         roll_cooldowns[user_id_key] = current_time_stamp
-        attempt_info_text = "⏳ Следующий бесплатный ролл доступен через **2 часа**."
+        attempt_info_text = "⏳ Следующий бесплатный ролл доступен через <b>2 часа</b>."
 
     users_db[user_id_key]['bonus_luck'] = 1.0
     collections_db = load_data('colls')
@@ -480,10 +489,10 @@ def roll_card_handler(message):
     
     if has_duplicate:
         earned_points = int(RARITY_STATS[chosen_rarity_level]['score'] * 0.3)
-        result_status_label = f"🔄 **ДУБЛИКАТ!** Получена компенсация: `+{earned_points:,}`"
+        result_status_label = f"🔄 <b>ДУБЛИКАТ!</b> Получена компенсация: <code>+{earned_points:,}</code>"
     else:
         earned_points = RARITY_STATS[chosen_rarity_level]['score']
-        result_status_label = f"✨ **НОВАЯ КАРТА!** Добавлена в коллекцию: `+{earned_points:,}`"
+        result_status_label = f"✨ <b>НОВАЯ КАРТА!</b> Добавлена в коллекцию: <code>+{earned_points:,}</code>"
         collections_db[user_id_key].append(won_card_object)
         save_data(collections_db, 'colls')
 
@@ -492,21 +501,26 @@ def roll_card_handler(message):
     
     stars_visual_representation = "⭐" * chosen_rarity_level
     caption_message = (
-        f"🏆 **СПИН РУЛЕТКИ ЗАВЕРШЕН!**\n\n"
-        f"🏃‍♂️ Игрок: **{won_card_object.get('name')}**\n"
-        f"🛡 Позиция: `{POSITIONS_RU.get(won_card_object.get('position', 'ЦП'))}`\n"
-        f"🏢 Клуб: _{won_card_object.get('club', 'Свободный агент')}_\n"
+        f"🏆 <b>СПИН РУЛЕТКИ ЗАВЕРШЕН!</b>\n\n"
+        f"🏃‍♂️ Игрок: <b>{won_card_object.get('name')}</b>\n"
+        f"🛡 Позиция: <code>{POSITIONS_RU.get(won_card_object.get('position', 'ЦП'))}</code>\n"
+        f"🏢 Клуб: <i>{won_card_object.get('club', 'Свободный агент')}</i>\n"
         f"📊 Редкость: {stars_visual_representation}\n"
-        f"⚡ АТК: **{RARITY_STATS[chosen_rarity_level]['atk']}**\n\n"
+        f"⚡ АТК: <b>{RARITY_STATS[chosen_rarity_level]['atk']}</b>\n\n"
         f"{result_status_label}\n"
-        f"💰 Баланс: **{users_db[user_id_key]['score']:,}** очков.\n\n"
+        f"💰 Баланс: <b>{users_db[user_id_key]['score']:,}</b> очков.\n\n"
         f"{attempt_info_text}"
     )
 
-    try:
-        bot.send_photo(message.chat.id, won_card_object.get('photo'), caption=caption_message, parse_mode="Markdown")
-    except Exception:
-        bot.send_message(message.chat.id, caption_message, parse_mode="Markdown")
+    card_photo = won_card_object.get('photo')
+    if card_photo:
+        try:
+            bot.send_photo(message.chat.id, card_photo, caption=caption_message, parse_mode="HTML")
+        except Exception as e:
+            logger.error(f"Ошибка при отправке фото карточки: {e}")
+            bot.send_message(message.chat.id, f"⚠️ Не удалось загрузить картинку карточки.\n\n{caption_message}", parse_mode="HTML")
+    else:
+        bot.send_message(message.chat.id, caption_message, parse_mode="HTML")
 
 # ==============================================================================
 # [10] ГАЛЕРЕЯ КОЛЛЕКЦИИ И СОСТАВЫ ИГРОКОВ
@@ -604,4 +618,142 @@ def process_manage_slot_callback(call):
         
     selection_markup = types.InlineKeyboardMarkup(row_width=1)
     for index, card in enumerate(eligible_cards):
-        button_text = f"{card.get('name')} (
+        button_text = f"{card.get('name')} (АТК: {RARITY_STATS[card.get('stars', 1)]['atk']})"
+        selection_markup.add(types.InlineKeyboardButton(button_text, callback_data=f"setcard_{slot_id_to_change}_{index}"))
+    selection_markup.add(types.InlineKeyboardButton("🗑 Очистить слот", callback_data=f"clear_slot_{slot_id_to_change}"))
+    
+    bot.send_message(call.message.chat.id, "🏃‍♂️ **ВЫБОР ИГРОКА:**", reply_markup=selection_markup)
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("setcard_") or call.data.startswith("clear_slot_"))
+def finalize_slot_assignment_callback(call):
+    user_id_key = str(call.from_user.id)
+    squads_db = load_data('squads')
+    if user_id_key not in squads_db: squads_db[user_id_key] = [None] * 7
+
+    if call.data.startswith("clear_slot_"):
+        slot_id = int(call.data.replace("clear_slot_", ""))
+        squads_db[user_id_key][slot_id] = None
+        save_data(squads_db, 'squads')
+        bot.edit_message_text("✅ Игрок убран из тактического состава.", chat_id=call.message.chat.id, message_id=call.message.message_id)
+        return
+
+    data_parts = call.data.split("_")
+    slot_id, card_index_in_pool = int(data_parts[1]), int(data_parts[2])
+    collections_db = load_data('colls')
+    eligible_cards = [c for c in collections_db.get(user_id_key, []) if c.get('position') == SQUAD_SLOTS[slot_id]['code']]
+    
+    squads_db[user_id_key][slot_id] = eligible_cards[card_index_in_pool]
+    save_data(squads_db, 'squads')
+    bot.edit_message_text(f"✅ Утвержден на позицию: **{eligible_cards[card_index_in_pool].get('name')}**", chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
+
+# ==============================================================================
+# [11] ПРОФИЛЬ И РЕЙТИНГИ
+# ==============================================================================
+
+@bot.message_handler(func=lambda m: m.text == "👤 Профиль")
+def user_profile_handler(message):
+    if check_ban_status(message.from_user):
+        return
+    user_id_key = str(message.from_user.id)
+    users_db = load_data('users')
+    collections_db = load_data('colls')
+    user_profile = users_db.get(user_id_key, {})
+    
+    profile_text = (
+        f"👤 **ЛИЧНЫЙ КАБИНЕТ МЕНЕДЖЕРА**\n\n"
+        f"📝 Никнейм: **{user_profile.get('nick', 'Не указан')}**\n"
+        f"💰 Баланс: **{user_profile.get('score', 0):,}** очков\n"
+        f"🎫 Прокруты: **{user_profile.get('free_rolls', 0)}** шт.\n"
+        f"🗂 Всего карт: **{len(collections_db.get(user_id_key, []))}** шт.\n"
+        f"⚔️ Мощность состава: **{calculate_total_power(message.from_user.id)}** АТК\n"
+    )
+    bot.send_message(message.chat.id, profile_text, parse_mode="Markdown")
+
+
+@bot.message_handler(func=lambda m: m.text == "🏆 Топ очков")
+def leaderboard_handler(message):
+    if check_ban_status(message.from_user):
+        return
+    users_db = load_data('users')
+    sorted_users = sorted(users_db.items(), key=lambda item: item[1].get('score', 0), reverse=True)[:10]
+    
+    leaderboard_text = "🏆 **ТОП-10 ФУТБОЛЬНЫХ МЕНЕДЖЕРОВ**\n\n"
+    for rank, (uid, p_data) in enumerate(sorted_users, 1):
+        medal = "🥇" if rank == 1 else "🥈" if rank == 2 else "🥉" if rank == 3 else f"{rank}."
+        leaderboard_text += f"{medal} {p_data.get('nick')} ({p_data.get('username')}) — **{p_data.get('score', 0):,}** очков\n"
+    bot.send_message(message.chat.id, leaderboard_text, parse_mode="Markdown")
+
+# ==============================================================================
+# [12] ПВП АРЕНА (СТАРТОВЫЙ ДВИЖОК С ЗАГЛУШКОЙ ОШИБКИ СИНТАКСИСА)
+# ==============================================================================
+
+@bot.message_handler(func=lambda m: m.text == "🏟 ПВП Арена")
+def pvp_arena_entry_handler(message):
+    """Главная точка входа на Арену. Запрашивает выбор режима матча."""
+    if check_ban_status(message.from_user):
+        return
+        
+    user_id_key = str(message.from_user.id)
+    current_time_stamp = time.time()
+    
+    # Кулдаун 1 час на поединки (для не-админов)
+    if not check_admin_permission(message.from_user):
+        if user_id_key in pvp_cooldowns:
+            elapsed_time = current_time_stamp - pvp_cooldowns[user_id_key]
+            if elapsed_time < 3600:
+                remaining_seconds = int(3600 - elapsed_time)
+                bot.send_message(message.chat.id, f"⏳ **Команда на восстановлении!** Следующий ПВП-матч доступен через **{remaining_seconds // 60} мин. {remaining_seconds % 60} сек.**")
+                return
+
+    squads_db = load_data('squads')
+    my_squad = squads_db.get(user_id_key, [])
+    if not my_squad or all(slot is None for slot in my_squad):
+        bot.send_message(message.chat.id, "🏟 **Арена:** Вы не можете играть с пустым составом! Зайдите в меню **📋 Состав**.", parse_mode="Markdown")
+        return
+
+    bot.send_message(
+        message.chat.id,
+        "🏟 **ДОБРО ПОЖАЛОВАТЬ НА ПВП АРЕНУ!**\n\n"
+        "Выберите тип футбольного противостояния:\n"
+        "1️⃣ **Быстрый матч с ботом** — игра против случайного зарегистрированного состава из базы.\n"
+        "2️⃣ **Онлайн-матч** — бот поместит вас в комнату ожидания и подберет живого соперника, запустившего поиск параллельно!",
+        reply_markup=create_pvp_menu(),
+        parse_mode="Markdown"
+    )
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("pvp_mode_"))
+def process_pvp_mode_selection(call):
+    """Обработчик выбора режима матча."""
+    user_id_key = str(call.from_user.id)
+    mode = call.data.replace("pvp_mode_", "")
+    
+    # Повторная базовая проверка на КД
+    current_time_stamp = time.time()
+    if not check_admin_permission(call.from_user) and user_id_key in pvp_cooldowns and (current_time_stamp - pvp_cooldowns[user_id_key]) < 3600:
+        bot.answer_callback_query(call.id, "Вы еще не восстановились!")
+        return
+
+    bot.answer_callback_query(call.id, "Режим выбран")
+    
+    # --- РЕЖИМ 1: МАТЧ С БОТОМ ---
+    if mode == "bot":
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+        squads_db = load_data('squads')
+        potential_opponents = [uid for uid in squads_db.keys()]
+        
+        # Заглушка логики до её полного написания
+        bot.send_message(call.message.chat.id, "🤖 Режим матча с ботом находится в разработке.")
+    
+    # --- РЕЖИМ 2: ОНЛАЙН МАТЧ ---
+    elif mode == "online":
+        bot.send_message(call.message.chat.id, "🔎 Поиск соперника начат...")
+
+
+# ==============================================================================
+# ЗАПУСК БОТА (БЕСКОНЕЧНЫЙ ЦИКЛ ПОЛЛИНГА)
+# ==============================================================================
+if __name__ == '__main__':
+    logger.info("Бот успешно инициализирован и готов к приему команд.")
+    bot.infinity_polling(skip_pending=True)
