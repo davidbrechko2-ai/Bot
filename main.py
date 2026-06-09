@@ -244,7 +244,6 @@ def create_main_menu(user_id):
 def create_admin_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     btn_add_card = types.KeyboardButton("➕ Добавить карту")
-    btn_edit_card = types.KeyboardButton("📝 Изменить карту")
     btn_del_card = types.KeyboardButton("🗑 Удалить карту")
     btn_add_promo = types.KeyboardButton("🎟 +Промокод")
     btn_del_promo = types.KeyboardButton("🗑 Удалить промокод")
@@ -253,7 +252,7 @@ def create_admin_menu():
     btn_reset = types.KeyboardButton("🧨 Обнулить бота")
     btn_back = types.KeyboardButton("🏠 Назад в меню")
     
-    markup.add(btn_add_card, btn_edit_card, btn_del_card)
+    markup.add(btn_add_card, btn_del_card)
     markup.add(btn_add_promo, btn_del_promo)
     markup.add(btn_ban, btn_unban)
     markup.add(btn_reset, btn_back)
@@ -724,7 +723,6 @@ def process_pvp_mode_selection(call):
     user_id_key = str(call.from_user.id)
     mode = call.data.replace("pvp_mode_", "")
     
-    # Повторная базовая проверка на КД
     current_time_stamp = time.time()
     if not check_admin_permission(call.from_user) and user_id_key in pvp_cooldowns and (current_time_stamp - pvp_cooldowns[user_id_key]) < 3600:
         bot.answer_callback_query(call.id, "Вы еще не восстановились!")
@@ -736,242 +734,290 @@ def process_pvp_mode_selection(call):
     if mode == "bot":
         bot.delete_message(call.message.chat.id, call.message.message_id)
         squads_db = load_data('squads')
+        users_db = load_data('users')
+        
         potential_opponents = [uid for uid in squads_db.keys() if uid != user_id_key and any(slot is not None for slot in squads_db[uid])]
         
         if not potential_opponents:
-            bot.send_message(call.message.chat.id, "🏟 Полноценных ботов-составов не найдено. Попробуйте Онлайн-матч!")
-            return
+            bot.send_message(call.message.chat.id, "🤖 К сожалению, в базе еще нет других команд для симуляции ИИ-матча. Выставлен дефолтный ИИ-соперник.")
+            opp_name = "ИИ-Бот Академии"
+            opp_power = random.randint(1000, 5000)
+        else:
+            chosen_opp_id = random.choice(potential_opponents)
+            opp_name = users_db.get(chosen_opp_id, {}).get('nick', 'Случайный Менеджер')
+            opp_power = calculate_total_power(chosen_opp_id)
+            if opp_power == 0: opp_power = random.randint(1000, 3000)
             
-        chosen_opponent_id = random.choice(potential_opponents)
-        users_db = load_data('users')
+        my_power = calculate_total_power(user_id_key)
         
-        my_total_atk = calculate_total_power(call.from_user.id)
-        opponent_total_atk = calculate_total_power(int(chosen_opponent_id))
+        bot.send_message(call.message.chat.id, "🎬 **Матч начался! Рефери дает стартовый свисток...**")
+        time.sleep(1.5)
         
+        # Генерация счета на основе мощностей
+        my_score = 0
+        opp_score = 0
+        for _ in range(3):  # 3 опасных момента
+            if random.randint(0, my_power + opp_power) < my_power:
+                my_score += 1
+            if random.randint(0, my_power + opp_power) < opp_power:
+                opp_score += 1
+                
         pvp_cooldowns[user_id_key] = current_time_stamp
         
-        bot.send_message(call.message.chat.id, f"🏟 **МАТЧ С БОТОМ НАЧАТ!**\n\n⚔️ Ваша сила: **{my_total_atk} АТК**\n🛡 Сила соперника: **{opponent_total_atk} АТК**\n\n*Арбитр симулирует игру...*", parse_mode="Markdown")
-        time.sleep(2)
+        result_text = f"🏟 **ФИНАЛЬНЫЙ СВИСТОК!**\n\nВаша команда: **{my_power} АТК**\nКоманда {opp_name}: **{opp_power} АТК**\n\n🔢 Счёт матча: 🟥 **{my_score} : {opp_score}** 🟨\n\n"
         
-        # Симуляция исхода
-        total_pool = my_total_atk + opponent_total_atk if (my_total_atk + opponent_total_atk) > 0 else 1
-        if random.uniform(0, 100) <= (my_total_atk / total_pool * 100):
-            prize = random.randint(3000, 7000)
-            users_db[user_id_key]['score'] = users_db[user_id_key].get('score', 0) + prize
-            res_msg = f"🎉 **ПОБЕДА!** Награда: **+{prize:,} очков**!"
+        if my_score > opp_score:
+            reward = 3500
+            users_db[user_id_key]['score'] = users_db[user_id_key].get('score', 0) + reward
+            result_text += f"🎉 **ПОБЕДА!** Вы продемонстрировали выдающийся тактический футбол. Награда: **+{reward} очков**!"
+        elif my_score < opp_score:
+            result_text += "❌ **ПОРАЖЕНИЕ.** Ваш состав не устоял под прессингом оппонента. Проведите ротацию состава и попробуйте снова!"
         else:
-            consolation = random.randint(500, 1500)
-            users_db[user_id_key]['score'] = users_db[user_id_key].get('score', 0) + consolation
-            res_msg = f"😭 **ПОРАЖЕНИЕ!** Утешительный бонус: **+{consolation:,} очков**."
+            reward = 1000
+            users_db[user_id_key]['score'] = users_db[user_id_key].get('score', 0) + reward
+            result_text += f"🤝 **НИЧЬЯ!** Напряженная борьба на каждом сантиметре поля. Бонус: **+{reward} очков**."
             
         save_data(users_db, 'users')
-        bot.send_message(call.message.chat.id, res_msg, parse_mode="Markdown")
+        bot.send_message(call.message.chat.id, result_text, parse_mode="Markdown")
 
-    # --- РЕЖИМ 2: ОНЛАЙН-МАТЧ (МАТЧМЕЙКИНГ РЕАЛЬНОГО ВРЕМЕНИ) ---
+    # --- РЕЖИМ 2: ОНЛАЙН-МАТЧ С ЖИВЫМ ИГРОКОМ ---
     elif mode == "online":
         bot.delete_message(call.message.chat.id, call.message.message_id)
-        
-        if user_id_key in online_matchmaking_queue:
-            bot.send_message(call.message.chat.id, "🔎 Вы уже находитесь в очереди поиска онлайн-матча.")
+        if int(user_id_key) in online_matchmaking_queue:
+            bot.send_message(call.message.chat.id, "🔎 Вы уже находитесь в очереди поиска онлайн-игры.")
             return
-
-        # Если в очереди никого нет — становимся первыми
-        if not online_matchmaking_queue:
-            online_matchmaking_queue.append(user_id_key)
-            bot.send_message(
-                call.message.chat.id, 
-                "🔎 **ПОИСК ЖИВОГО СОПЕРНИКА...**\n\n"
-                "Вы успешно добавлены в комнату ожидания.\n"
-                "Как только другой менеджер нажмет поиск, матч начнется автоматически! Вы получите уведомление.",
-                parse_mode="Markdown"
-            )
-            log_action(user_id_key, "ENTERED_ONLINE_QUEUE")
-        else:
-            # Вытягиваем соперника из очереди
-            opponent_id_key = online_matchmaking_queue.pop(0)
             
-            # Защита от игры с самим собой (если баг очереди)
+        if online_matchmaking_queue:
+            opponent_id_key = str(online_matchmaking_queue.pop(0))
             if opponent_id_key == user_id_key:
-                online_matchmaking_queue.append(user_id_key)
-                bot.send_message(call.message.chat.id, "🔎 Поиск продолжается...")
+                bot.send_message(call.message.chat.id, "🔎 Поиск возобновлен. Ожидайте оппонента...")
+                online_matchmaking_queue.append(int(user_id_key))
                 return
                 
+            # Старт матча между user_id_key и opponent_id_key
             users_db = load_data('users')
+            p1_name = users_db.get(user_id_key, {}).get('nick', 'Игрок 1')
+            p2_name = users_db.get(opponent_id_key, {}).get('nick', 'Игрок 2')
             
-            # Фиксация кулдауна обоим игрокам
+            p1_power = calculate_total_power(user_id_key)
+            p2_power = calculate_total_power(opponent_id_key)
+            
+            # Оповещение обоих игроков
+            match_start_announcement = "⚡ **СОПЕРНИК НАЙДЕН!**\n\n⚔ Противостояние начинается прямо сейчас!"
+            try:
+                bot.send_message(int(user_id_key), match_start_announcement)
+                bot.send_message(int(opponent_id_key), match_start_announcement)
+            except Exception:
+                pass
+                
+            p1_goals = 0
+            p2_goals = 0
+            for _ in range(3):
+                if random.randint(0, p1_power + p2_power) < p1_power: p1_goals += 1
+                if random.randint(0, p1_power + p2_power) < p2_power: p2_goals += 1
+                
             pvp_cooldowns[user_id_key] = current_time_stamp
             pvp_cooldowns[opponent_id_key] = current_time_stamp
             
-            # Расчет сил сторон
-            p1_atk = calculate_total_power(int(user_id_key))
-            p2_atk = calculate_total_power(int(opponent_id_key))
-            
-            p1_nick = users_db.get(user_id_key, {}).get('nick', 'Игрок 1')
-            p2_nick = users_db.get(opponent_id_key, {}).get('nick', 'Игрок 2')
-            
-            # Математика триумфа
-            total_atk_pool = p1_atk + p2_atk if (p1_atk + p2_atk) > 0 else 1
-            p1_win_chance = (p1_atk / total_atk_pool) * 100
-            
-            dice_roll = random.uniform(0, 100)
-            
-            if dice_roll <= p1_win_chance:
-                # Победил Игрок 1 (тот, кто только что нажал кнопку)
-                p1_prize = random.randint(5000, 10000)  # В онлайне награды выше!
-                p2_consolation = random.randint(1000, 2000)
-                
-                users_db[user_id_key]['score'] = users_db[user_id_key].get('score', 0) + p1_prize
-                users_db[opponent_id_key]['score'] = users_db[opponent_id_key].get('score', 0) + p2_consolation
-                
-                # Уведомление первому
-                msg_p1 = f"🏟 **ОНЛАЙН-МАТЧ НАЙДЕН И ЗАВЕРШЕН!**\n\n⚔️ Соперник: **{p2_nick}**\n\n🎉 **ВЫ ПОБЕДИЛИ!** На поле была тотальная доминация.\n🎁 Награда: **+{p1_prize:,} очков**!"
-                # Уведомление второму (кто ждал в очереди)
-                msg_p2 = f"🏟 **ОНЛАЙН-МАТЧ НАЙДЕН И ЗАВЕРШЕН!**\n\n⚔️ Соперник: **{p1_nick}**\n\n😭 **ВЫ ПРОИГРАЛИ!** Соперник обошел вас тактически.\n🎁 Утешительный бонус: **+{p2_consolation:,} очков**."
+            # Подсчет итогов для Игрока 1
+            res_p1 = f"🏟 **ИТОГИ ОНЛАЙН МАТЧА**\n\nВы: **{p1_power} АТК** ({p1_name})\nСоперник: **{p2_power} АТК** ({p2_name})\n\n🔢 Итоговый счёт: `{p1_goals} : {p2_goals}`\n\n"
+            if p1_goals > p2_goals:
+                users_db[user_id_key]['score'] = users_db[user_id_key].get('score', 0) + 5000
+                res_p1 += "🎉 **ВЫ ПОБЕДИЛИ!** Награда: **+5,000 очков!**"
+            elif p1_goals < p2_goals:
+                res_p1 += "❌ **ВЫ ПРОИГРАЛИ.** Оппонент оказался сильнее в этот раз."
             else:
-                # Победил Игрок 2 (тот, кто покорно ждал в очереди)
-                p2_prize = random.randint(5000, 10000)
-                p1_consolation = random.randint(1000, 2000)
+                users_db[user_id_key]['score'] = users_db[user_id_key].get('score', 0) + 1500
+                res_p1 += "🤝 **НИЧЬЯ!** Бонус: **+1,500 очков.**"
                 
-                users_db[opponent_id_key]['score'] = users_db[opponent_id_key].get('score', 0) + p2_prize
-                users_db[user_id_key]['score'] = users_db[user_id_key].get('score', 0) + p1_consolation
+            # Подсчет итогов для Игрока 2
+            res_p2 = f"🏟 **ИТОГИ ОНЛАЙН МАТЧА**\n\nВы: **{p2_power} АТК** ({p2_name})\nСоперник: **{p1_power} АТК** ({p1_name})\n\n🔢 Итоговый счёт: `{p2_goals} : {p1_goals}`\n\n"
+            if p2_goals > p1_goals:
+                users_db[opponent_id_key]['score'] = users_db[opponent_id_key].get('score', 0) + 5000
+                res_p2 += "🎉 **ВЫ ПОБЕДИЛИ!** Награда: **+5,000 очков!**"
+            elif p2_goals < p1_goals:
+                res_p2 += "❌ **ВЫ ПРОИГРАЛИ.** Оппонент оказался сильнее в этот раз."
+            else:
+                users_db[opponent_id_key]['score'] = users_db[opponent_id_key].get('score', 0) + 1500
+                res_p2 += "🤝 **НИЧЬЯ!** Бонус: **+1,500 очков.**"
                 
-                msg_p1 = f"🏟 **ОНЛАЙН-МАТЧ НАЙДЕН И ЗАВЕРШЕН!**\n\n⚔️ Соперник: **{p2_nick}**\n\n😭 **ВЫ ПРОИГРАЛИ!** Оппонент контратаковал безупречно.\n🎁 Утешительный бонус: **+{p1_consolation:,} очков**."
-                msg_p2 = f"🏟 **ОНЛАЙН-МАТЧ НАЙДЕН И ЗАВЕРШЕН!**\n\n⚔️ Соперник: **{p1_nick}**\n\n🎉 **ВЫ ПОБЕДИЛИ!** Команда из зала ожидания разгромила врага!\n🎁 Награда: **+{p2_prize:,} очков**!"
-
             save_data(users_db, 'users')
             
-            # Безопасная рассылка итогов
-            try: bot.send_message(int(user_id_key), msg_p1, parse_mode="Markdown")
-            except Exception: pass
-            
-            try: bot.send_message(int(opponent_id_key), msg_p2, parse_mode="Markdown")
-            except Exception: pass
-            
-            log_action(user_id_key, f"ONLINE_MATCH_RESOLVED_WITH_{opponent_id_key}")
+            try:
+                bot.send_message(int(user_id_key), res_p1, parse_mode="Markdown")
+                bot.send_message(int(opponent_id_key), res_p2, parse_mode="Markdown")
+            except Exception:
+                pass
+        else:
+            online_matchmaking_queue.append(int(user_id_key))
+            bot.send_message(call.message.chat.id, "🔎 **Вы добавлены в комнату ожидания...**\nБот ищет живого оппонента. Пожалуйста, подождите. Как только второй игрок нажмет поиск, матч начнется автоматически!")
 
 # ==============================================================================
-# [13] МОДУЛЬ АДМИНИСТРИРОВАНИЯ
+# [13] АДМИНИСТРАТИВНЫЙ ФУНКЦИОНАЛ (УПРАВЛЕНИЕ СИСТЕМОЙ)
 # ==============================================================================
 
 @bot.message_handler(func=lambda m: m.text == "🛠 Админ-панель")
 def admin_panel_root_handler(message):
-    if not check_admin_permission(message.from_user): return
-    bot.send_message(message.chat.id, "🛠 **ИНЖЕНЕРНАЯ АДМИН-ПАНЕЛЬ БОТА**", reply_markup=create_admin_menu(), parse_mode="Markdown")
+    if not check_admin_permission(message.from_user):
+        return
+    bot.send_message(message.chat.id, "🛠 **ГЛАВНОЕ МЕНЮ АДМИНИСТРАТОРА**\n\nВыберите команду управления:", reply_markup=create_admin_menu())
 
 
 @bot.message_handler(func=lambda m: m.text == "🏠 Назад в меню")
 def admin_back_to_main_menu(message):
-    if not check_admin_permission(message.from_user): return
-    bot.send_message(message.chat.id, "🔄 Вы вышли из режима администрирования.", reply_markup=create_main_menu(message.from_user.id))
+    bot.send_message(message.chat.id, "🔄 Возврат в пользовательское меню.", reply_markup=create_main_menu(message.from_user.id))
 
 
 @bot.message_handler(func=lambda m: m.text == "➕ Добавить карту")
-def admin_add_card_start(message):
+def admin_add_card_step1(message):
     if not check_admin_permission(message.from_user): return
-    sent = bot.send_message(message.chat.id, "➕ **Имя футболиста:**", reply_markup=create_cancel_menu(), parse_mode="Markdown")
-    bot.register_next_step_handler(sent, admin_add_card_step_2)
+    msg = bot.send_message(message.chat.id, "Введите данные новой карты в формате:\n`Имя | Позиция (ГК, ЛЗ, ПЗ, ЦП, ЛВ, ПВ, КФ) | Клуб | Редкость (1-5) | URL-Фото`", reply_markup=create_cancel_menu())
+    bot.register_next_step_handler(msg, admin_add_card_step2)
+
+def admin_add_card_step2(message):
+    if message.text == "❌ Отмена":
+        bot.send_message(message.chat.id, "Действие отменено", reply_markup=create_admin_menu())
+        return
+    try:
+        parts = message.text.split("|")
+        name = parts[0].strip()
+        pos = parts[1].strip().upper()
+        club = parts[2].strip()
+        stars = int(parts[3].strip())
+        photo = parts[4].strip()
+        
+        cards = load_data('cards')
+        cards.append({"name": name, "position": pos, "club": club, "stars": stars, "photo": photo})
+        save_data(cards, 'cards')
+        bot.send_message(message.chat.id, f"✅ Карта **{name}** успешно добавлена в общую базу роллов!", reply_markup=create_admin_menu(), parse_mode="Markdown")
+    except Exception:
+        bot.send_message(message.chat.id, "❌ Ошибка синтаксиса. Проверьте разделители и формат данных.", reply_markup=create_admin_menu())
 
 
-def admin_add_card_step_2(message):
-    if message.text == "❌ Отмена": return
-    card_name = message.text.strip()
-    sent = bot.send_message(message.chat.id, f"➕ Позиция (**ГК, ЛЗ, ПЗ, ЦП, ЛВ, ПВ, КФ**):")
-    bot.register_next_step_handler(sent, admin_add_card_step_3, card_name)
+@bot.message_handler(func=lambda m: m.text == "🗑 Удалить карту")
+def admin_delete_card_step1(message):
+    if not check_admin_permission(message.from_user): return
+    msg = bot.send_message(message.chat.id, "Введите ТОЧНОЕ имя футболиста для удаления карты из системы:", reply_markup=create_cancel_menu())
+    bot.register_next_step_handler(msg, admin_delete_card_step2)
 
-
-def admin_add_card_step_3(message, card_name):
-    pos = message.text.strip().upper()
-    if pos not in POSITIONS_RU: return
-    sent = bot.send_message(message.chat.id, f"➕ Звездность (**1-5**):")
-    bot.register_next_step_handler(sent, admin_add_card_step_4, card_name, pos)
-
-
-def admin_add_card_step_4(message, card_name, pos):
-    stars = int(message.text.strip())
-    sent = bot.send_message(message.chat.id, f"➕ Название клуба:")
-    bot.register_next_step_handler(sent, admin_add_card_step_5, card_name, pos, stars)
-
-
-def admin_add_card_step_5(message, card_name, pos, stars):
-    club = message.text.strip()
-    sent = bot.send_message(message.chat.id, f"➕ Прямая URL-ссылка на фото:")
-    bot.register_next_step_handler(sent, admin_add_card_finalize, card_name, pos, stars, club)
-
-
-def admin_add_card_finalize(message, card_name, pos, stars, club):
-    photo_url = message.text.strip()
-    cards_list = load_data('cards')
-    cards_list.append({"name": card_name, "position": pos, "stars": stars, "club": club, "photo": photo_url})
-    save_data(cards_list, 'cards')
-    bot.send_message(message.chat.id, "✅ Карточка успешно добавлена!", reply_markup=create_admin_menu())
+def admin_delete_card_step2(message):
+    if message.text == "❌ Отмена":
+        bot.send_message(message.chat.id, "Действие отменено", reply_markup=create_admin_menu())
+        return
+    cards = load_data('cards')
+    target = message.text.strip()
+    new_cards = [c for c in cards if c.get('name', '').lower() != target.lower()]
+    
+    if len(cards) == len(new_cards):
+        bot.send_message(message.chat.id, "❌ Карта с таким именем не найдена.", reply_markup=create_admin_menu())
+    else:
+        save_data(new_cards, 'cards')
+        bot.send_message(message.chat.id, f"✅ Карта **{target}** успешно удалена из базы.", reply_markup=create_admin_menu(), parse_mode="Markdown")
 
 
 @bot.message_handler(func=lambda m: m.text == "🎟 +Промокод")
-def admin_add_promo_start(message):
+def admin_add_promo_step1(message):
     if not check_admin_permission(message.from_user): return
-    sent = bot.send_message(message.chat.id, "🎟 **Кодовое слово:**", reply_markup=create_cancel_menu(), parse_mode="Markdown")
-    bot.register_next_step_handler(sent, admin_add_promo_step_2)
+    msg = bot.send_message(message.chat.id, "Введите параметры промокода в формате:\n`КОД | Тип (score / rolls / luck) | Значение`", reply_markup=create_cancel_menu())
+    bot.register_next_step_handler(msg, admin_add_promo_step2)
+
+def admin_add_promo_step2(message):
+    if message.text == "❌ Отмена":
+        bot.send_message(message.chat.id, "Действие отменено", reply_markup=create_admin_menu())
+        return
+    try:
+        parts = message.text.split("|")
+        code = parts[0].strip().upper()
+        p_type = parts[1].strip().lower()
+        val = float(parts[2].strip()) if p_type == 'luck' else int(parts[2].strip())
+        
+        promos = load_data('promos')
+        promos[code] = {"type": p_type, "value": val}
+        save_data(promos, 'promos')
+        bot.send_message(message.chat.id, f"✅ Промокод `{code}` успешно создан!", reply_markup=create_admin_menu(), parse_mode="Markdown")
+    except Exception:
+        bot.send_message(message.chat.id, "❌ Неверный формат данных.", reply_markup=create_admin_menu())
 
 
-def admin_add_promo_step_2(message):
-    promo_code = message.text.strip().upper()
-    sent = bot.send_message(message.chat.id, "🎟 Тип наград (**score, rolls, luck**):")
-    bot.register_next_step_handler(sent, admin_add_promo_step_3, promo_code)
+@bot.message_handler(func=lambda m: m.text == "🗑 Удалить промокод")
+def admin_del_promo_step1(message):
+    if not check_admin_permission(message.from_user): return
+    msg = bot.send_message(message.chat.id, "Введите кодовое слово промокода для удаления:", reply_markup=create_cancel_menu())
+    bot.register_next_step_handler(msg, admin_del_promo_step2)
 
-
-def admin_add_promo_step_3(message, promo_code):
-    p_type = message.text.strip().lower()
-    sent = bot.send_message(message.chat.id, "🎟 Значение бонуса:")
-    bot.register_next_step_handler(sent, admin_add_promo_finalize, promo_code, p_type)
-
-
-def admin_add_promo_finalize(message, promo_code, p_type):
-    val = float(message.text.strip()) if p_type == 'luck' else int(message.text.strip())
-    promos_db = load_data('promos')
-    promos_db[promo_code] = {"type": p_type, "value": val}
-    save_data(promos_db, 'promos')
-    bot.send_message(message.chat.id, "✅ Промокод создан!", reply_markup=create_admin_menu())
+def admin_del_promo_step2(message):
+    if message.text == "❌ Отмена":
+        bot.send_message(message.chat.id, "Действие отменено", reply_markup=create_admin_menu())
+        return
+    promos = load_data('promos')
+    target = message.text.strip().upper()
+    if target in promos:
+        del promos[target]
+        save_data(promos, 'promos')
+        bot.send_message(message.chat.id, f"✅ Промокод `{target}` уничтожен.", reply_markup=create_admin_menu(), parse_mode="Markdown")
+    else:
+        bot.send_message(message.chat.id, "❌ Промокод не найден.", reply_markup=create_admin_menu())
 
 
 @bot.message_handler(func=lambda m: m.text == "🚫 Забанить")
-def admin_ban_user_start(message):
+def admin_ban_step1(message):
     if not check_admin_permission(message.from_user): return
-    sent = bot.send_message(message.chat.id, "🚫 Введите ID или Username для бана:", reply_markup=create_cancel_menu())
-    bot.register_next_step_handler(sent, admin_ban_user_finalize)
+    msg = bot.send_message(message.chat.id, "Введите Telegram ID или юзернейм (без @) нарушителя:", reply_markup=create_cancel_menu())
+    bot.register_next_step_handler(msg, admin_ban_step2)
 
-
-def admin_ban_user_finalize(message):
+def admin_ban_step2(message):
+    if message.text == "❌ Отмена":
+        bot.send_message(message.chat.id, "Действие отменено", reply_markup=create_admin_menu())
+        return
+    bans = load_data('bans')
     target = message.text.strip().lower()
-    ban_list = load_data('bans')
-    ban_list.append(target)
-    save_data(ban_list, 'bans')
-    bot.send_message(message.chat.id, "✅ Бан успешно зафиксирован.", reply_markup=create_admin_menu())
+    if target not in bans:
+        bans.append(target)
+        save_data(bans, 'bans')
+        bot.send_message(message.chat.id, f"✅ Пользователь `{target}` добавлен в черный список.", reply_markup=create_admin_menu(), parse_mode="Markdown")
+    else:
+        bot.send_message(message.chat.id, "Пользователь уже находится в бане.", reply_markup=create_admin_menu())
+
+
+@bot.message_handler(func=lambda m: m.text == "✅ Разбанить")
+def admin_unban_step1(message):
+    if not check_admin_permission(message.from_user): return
+    msg = bot.send_message(message.chat.id, "Введите ID или юзернейм для разблокировки:", reply_markup=create_cancel_menu())
+    bot.register_next_step_handler(msg, admin_unban_step2)
+
+def admin_unban_step2(message):
+    if message.text == "❌ Отмена":
+        bot.send_message(message.chat.id, "Действие отменено", reply_markup=create_admin_menu())
+        return
+    bans = load_data('bans')
+    target = message.text.strip().lower()
+    if target in bans:
+        bans.remove(target)
+        save_data(bans, 'bans')
+        bot.send_message(message.chat.id, f"✅ Пользователь `{target}` амнистирован.", reply_markup=create_admin_menu(), parse_mode="Markdown")
+    else:
+        bot.send_message(message.chat.id, "Данный пользователь отсутствует в черном списке.", reply_markup=create_admin_menu())
 
 
 @bot.message_handler(func=lambda m: m.text == "🧨 Обнулить бота")
-def admin_hard_reset_system(message):
+def admin_reset_system_step1(message):
     if not check_admin_permission(message.from_user): return
-    save_data({}, 'users')
-    save_data({}, 'colls')
-    save_data({}, 'squads')
-    roll_cooldowns.clear()
-    pvp_cooldowns.clear()
-    online_matchmaking_queue.clear()
-    bot.send_message(message.chat.id, "🧨 Полный сброс выполнен!", reply_markup=create_admin_menu())
+    msg = bot.send_message(message.chat.id, "Вы уверены, что хотите полностью стереть профили, составы и коллекции ВСЕХ пользователей? Напишите `ДА, Я УВЕРЕН` для подтверждения.", reply_markup=create_cancel_menu())
+    bot.register_next_step_handler(msg, admin_reset_system_step2)
+
+def admin_reset_system_step2(message):
+    if message.text == "ДА, Я УВЕРЕН":
+        save_data({}, 'users')
+        save_data({}, 'colls')
+        save_data({}, 'squads')
+        bot.send_message(message.chat.id, "🧨 **ИГРОВАЯ БАЗА ДАННЫХ УСПЕШНО СБРОШЕНА ДО НУЛЯ!**", reply_markup=create_admin_menu(), parse_mode="Markdown")
+    else:
+        bot.send_message(message.chat.id, "Действие отменено или подтверждение введено неверно.", reply_markup=create_admin_menu())
 
 # ==============================================================================
-# [14] ПРЕДОХРАНИТЕЛЬНЫЙ ДЕФОЛТНЫЙ ОБРАБОТЧИК
-# ==============================================================================
-
-@bot.message_handler(func=lambda message: True)
-def default_fallback_text_handler(message):
-    if check_ban_status(message.from_user): return
-    bot.send_message(message.chat.id, "❓ Используйте кнопки графического меню.", reply_markup=create_main_menu(message.from_user.id))
-
-# ==============================================================================
-# [15] ЗАПУСК БОТА (POLLING)
+# [14] ТОЧКА ВХОДА И НЕПРЕРЫВНЫЙ ОПРОС (POLLING)
 # ==============================================================================
 
 if __name__ == '__main__':
-    logger.info("Бот футбольных карточек запущен на портах Telegram...")
-    bot.infinity_polling(skip_pending=True)
+    logger.info("Футбольный менеджер-симулятор успешно запущен и готов к обработке пакетов.")
+    bot.infinity_polling(timeout=10, long_polling_timeout=5)
