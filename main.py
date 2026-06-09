@@ -423,7 +423,7 @@ def process_promo_logic(message):
     bot.send_message(message.chat.id, success_msg, reply_markup=create_main_menu(message.from_user.id), parse_mode="Markdown")
 
 # ==============================================================================
-# [9] СИСТЕМА ПРОКРУТОВ КАРТ (КД 2 ЧАСА) — ИСПРАВЛЕНО И ПЕРЕВЕДЕНО НА HTML
+# [9] СИСТЕМА ПРОКРУТОВ КАРТ (КД 2 ЧАСА)
 # ==============================================================================
 
 @bot.message_handler(func=lambda m: m.text == "🎰 Крутить карту")
@@ -685,7 +685,7 @@ def leaderboard_handler(message):
     bot.send_message(message.chat.id, leaderboard_text, parse_mode="Markdown")
 
 # ==============================================================================
-# [12] ПВП АРЕНА (СТАРТОВЫЙ ДВИЖОК С ЗАГЛУШКОЙ ОШИБКИ СИНТАКСИСА)
+# [12] ПВП АРЕНА (СТАРТОВЫЙ ДВИЖОК)
 # ==============================================================================
 
 @bot.message_handler(func=lambda m: m.text == "🏟 ПВП Арена")
@@ -743,12 +743,45 @@ def process_pvp_mode_selection(call):
         squads_db = load_data('squads')
         potential_opponents = [uid for uid in squads_db.keys()]
         
-        # Заглушка логики до её полного написания
         bot.send_message(call.message.chat.id, "🤖 Режим матча с ботом находится в разработке.")
     
     # --- РЕЖИМ 2: ОНЛАЙН МАТЧ ---
     elif mode == "online":
         bot.send_message(call.message.chat.id, "🔎 Поиск соперника начат...")
+
+
+# ==============================================================================
+# [13] МОДУЛЬ АДМИНИСТРИРОВАНИЯ (НОВЫЙ)
+# ==============================================================================
+
+@bot.message_handler(func=lambda m: m.text == "🛠 Админ-панель")
+def admin_panel_text_handler(message):
+    # Жесткая проверка: если не админ, игнорируем команду
+    if not check_admin_permission(message.from_user):
+        return
+        
+    bot.send_message(
+        message.chat.id, 
+        "🛠 **ДОБРО ПОЖАЛОВАТЬ В ПАНЕЛЬ УПРАВЛЕНИЯ СИСТЕМОЙ!**\n\nВыбирайте необходимые действия на кнопках ниже.", 
+        reply_markup=create_admin_menu(),
+        parse_mode="Markdown"
+    )
+
+@bot.message_handler(func=lambda m: m.text == "🏠 Назад в меню")
+def back_to_main_menu_handler(message):
+    bot.send_message(
+        message.chat.id, 
+        "🏠 Вы вернулись в главное игровое меню.", 
+        reply_markup=create_main_menu(message.from_user.id),
+        parse_mode="Markdown"
+    )
+
+@bot.message_handler(func=lambda m: m.text in ["➕ Добавить карту", "📝 Изменить карту", "🗑 Удалить карту", "🎟 +Промокод", "🗑 Удалить промокод", "🚫 Забанить", "✅ Разбанить", "🧨 Обнулить бота"])
+def admin_actions_stub_handler(message):
+    if not check_admin_permission(message.from_user):
+        return
+    # Заглушка, чтобы админка не молчала при кликах на функционал управления базами
+    bot.send_message(message.chat.id, f"⚙️ Функция **«{message.text}»** вызвана, логика находится в стадии интеграции.")
 
 
 # ==============================================================================
